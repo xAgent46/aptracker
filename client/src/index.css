@@ -1,0 +1,160 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── AP Tracker — Casino Dark Theme ────────────────────────────
+   Art direction: deep casino green felt, gold accents, crimson signals
+   Inspired by the Parisian Macao's elegant casino floor atmosphere.
+   Default is DARK mode (casino environments are always dimly lit).
+──────────────────────────────────────────────────────────────── */
+
+@layer base {
+  :root,
+  [data-theme="light"] {
+    /* Surfaces — warm dark green felt */
+    --background: 160 20% 96%;
+    --foreground: 160 15% 10%;
+    --card: 0 0% 100%;
+    --card-foreground: 160 15% 10%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 160 15% 10%;
+    --muted: 160 8% 92%;
+    --muted-foreground: 160 5% 45%;
+    --border: 160 8% 82%;
+    --input: 160 8% 82%;
+
+    /* Primary — casino gold */
+    --primary: 42 80% 38%;
+    --primary-foreground: 42 60% 96%;
+
+    /* Secondary */
+    --secondary: 160 10% 90%;
+    --secondary-foreground: 160 15% 20%;
+
+    /* Accent */
+    --accent: 160 10% 90%;
+    --accent-foreground: 160 15% 20%;
+
+    /* States */
+    --destructive: 0 72% 44%;
+    --destructive-foreground: 0 0% 98%;
+    --ring: 42 80% 38%;
+
+    --radius: 0.625rem;
+  }
+
+  [data-theme="dark"] {
+    /* Surfaces — deep casino atmosphere */
+    --background: 158 18% 7%;
+    --foreground: 160 5% 85%;
+    --card: 158 16% 10%;
+    --card-foreground: 160 5% 85%;
+    --popover: 158 15% 11%;
+    --popover-foreground: 160 5% 85%;
+    --muted: 158 12% 14%;
+    --muted-foreground: 160 5% 50%;
+    --border: 158 10% 18%;
+    --input: 158 10% 18%;
+
+    /* Primary — casino gold */
+    --primary: 42 75% 52%;
+    --primary-foreground: 42 40% 10%;
+
+    /* Secondary */
+    --secondary: 158 12% 16%;
+    --secondary-foreground: 160 5% 80%;
+
+    /* Accent */
+    --accent: 158 12% 18%;
+    --accent-foreground: 160 5% 85%;
+
+    /* States */
+    --destructive: 0 62% 50%;
+    --destructive-foreground: 0 0% 98%;
+    --ring: 42 75% 52%;
+
+    --radius: 0.625rem;
+  }
+
+  /* System preference fallback */
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme]) {
+      --background: 158 18% 7%;
+      --foreground: 160 5% 85%;
+      --card: 158 16% 10%;
+      --card-foreground: 160 5% 85%;
+      --popover: 158 15% 11%;
+      --popover-foreground: 160 5% 85%;
+      --muted: 158 12% 14%;
+      --muted-foreground: 160 5% 50%;
+      --border: 158 10% 18%;
+      --input: 158 10% 18%;
+      --primary: 42 75% 52%;
+      --primary-foreground: 42 40% 10%;
+      --secondary: 158 12% 16%;
+      --secondary-foreground: 160 5% 80%;
+      --accent: 158 12% 18%;
+      --accent-foreground: 160 5% 85%;
+      --destructive: 0 62% 50%;
+      --destructive-foreground: 0 0% 98%;
+      --ring: 42 75% 52%;
+    }
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    min-height: 100dvh;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    font-size: 16px;
+    line-height: 1.5;
+  }
+
+  img, picture, video, canvas, svg {
+    display: block;
+    max-width: 100%;
+  }
+
+  input, button, textarea, select {
+    font: inherit;
+    color: inherit;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    text-wrap: balance;
+    line-height: 1.2;
+  }
+
+  :focus-visible {
+    outline: 2px solid hsl(var(--primary));
+    outline-offset: 2px;
+    border-radius: var(--radius);
+  }
+
+  button { cursor: pointer; }
+}
+
+/* ── Utilities ──────────────────────────────────────────────── */
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* Machine tile pulse for HOT status */
+@keyframes soft-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
+  50% { box-shadow: 0 0 0 4px rgba(239, 68, 68, 0); }
+}
