@@ -1,6 +1,9 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import { type Machine, type Session, STATUS_OPTIONS, AP_SIGNAL_OPTIONS, MACHINE_TYPES, BEING_PLAYED_OPTIONS } from "@shared/schema";
+import {
+  type Machine, type Session, type Layout, type ZoneConfig, type CabinetConfig,
+  STATUS_OPTIONS, AP_SIGNAL_OPTIONS, BEING_PLAYED_OPTIONS, type MachineType,
+} from "@shared/schema";
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { Link, useParams } from "wouter";
 import {
@@ -9,6 +12,7 @@ import {
   Moon, Sun, Plus, Minus, Clock, GripVertical, Users,
   TrendingUp, TrendingDown, Pencil, FileText,
   Rows, Columns, Coffee, Utensils, CircleDot, Play, Pause,
+  Lock, Unlock, Bell, LayoutGrid, Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,7 +27,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
 
-// dnd-kit core (for inter-cabinet drag in Pared)
+// dnd-kit core
 import {
   DndContext,
   closestCenter,
@@ -38,15 +42,12 @@ import {
   type DragEndEvent,
   type DragOverEvent,
 } from "@dnd-kit/core";
-
-// dnd-kit sortable (for intra-cabinet machine reorder)
 import {
   SortableContext,
   useSortable,
   arrayMove,
   rectSortingStrategy,
 } from "@dnd-kit/sortable";
-
 import { CSS } from "@dnd-kit/utilities";
 
 // ── Break type ───────────────────────────────────────────────────
@@ -88,6 +89,18 @@ const AP_CATEGORY_ICON: Record<string, React.ReactNode> = {
   other:   <AlertTriangle size={9} />,
 };
 
+// ── Player type color pills ───────────────────────────────────────
+const PLAYER_TYPE_PILL: Record<string, { bg: string; text: string; abbr: string; pulse?: boolean }> = {
+  long_time:      { bg: "bg-blue-700",   text: "text-blue-100",   abbr: "LT" },
+  money_out:      { bg: "bg-orange-600", text: "text-orange-100", abbr: "M$", pulse: true },
+  high_amount:    { bg: "bg-yellow-600", text: "text-yellow-100", abbr: "H$" },
+  jumping_bets:   { bg: "bg-violet-600", text: "text-violet-100", abbr: "JB" },
+  senior:         { bg: "bg-slate-500",  text: "text-slate-100",  abbr: "SR" },
+  beginner:       { bg: "bg-sky-600",    text: "text-sky-100",    abbr: "BG" },
+  normal:         { bg: "bg-gray-600",   text: "text-gray-100",   abbr: "NR" },
+  other:          { bg: "bg-gray-600",   text: "text-gray-100",   abbr: "?" },
+};
+
 // ── Timer hook ───────────────────────────────────────────────────
 function useElapsedTimer(statusChangedAt: string | null | undefined) {
   const [elapsed, setElapsed] = useState(0);
@@ -125,55 +138,10 @@ function LiveTimer({ statusChangedAt, status }: { statusChangedAt?: string; stat
   );
 }
 
-// ── Layout config ─────────────────────────────────────────────────
-export const CAROUSEL_CABINETS = [
-  { id: "A", label: "CAB A", ids: ["P-01","P-02","P-03","P-04"] as const },
-  { id: "B", label: "CAB B", ids: ["P-05","P-06","P-07","P-08"] as const },
-  { id: "C", label: "CAB C", ids: ["P-09","P-10","P-11","P-12"] as const },
-  { id: "D", label: "CAB D", ids: ["P-13","P-14","P-15","P-16"] as const },
-  { id: "E", label: "CAB E", ids: ["P-17","P-18","P-19","P-20"] as const },
-  { id: "F", label: "CAB F", ids: ["P-21","P-22","P-23","P-24"] as const },
-] as const;
-
-export const ARC_MACHINES = [
-  "P-25","P-26","P-27","P-28",
-  "P-29","P-30","P-31","P-32",
-]; // 8 machines in a circle
-
-export const CAROUSEL_IDS = [
-  ...CAROUSEL_CABINETS.flatMap(c => [...c.ids]),
-  ...ARC_MACHINES,
-];
-
-export const PASILLO_CABINETS = [
-  { id: "QA", label: "CAB A", ids: ["Q-01","Q-02","Q-03","Q-04"] as const,                   row: 0, col: 0 },
-  { id: "QB", label: "CAB B", ids: ["Q-05","Q-06","Q-07","Q-08"] as const,                   row: 0, col: 2 },
-  { id: "QC", label: "CAB C", ids: ["Q-09","Q-10","Q-11","Q-12"] as const,                   row: 1, col: 1 },
-  { id: "QD", label: "CAB D", ids: ["Q-13","Q-14","Q-15","Q-16","Q-17","Q-18"] as const,    row: 2, col: 0 },
-] as const;
-export const PASILLO_IDS = PASILLO_CABINETS.flatMap(c => [...c.ids]);
-
-export const SMOKING_CABINETS = [
-  { id: "SA", label: "CAB A", ids: ["S-01","S-02","S-03","S-04"] as const,                   row: 0, col: 0 },
-  { id: "SB", label: "CAB B", ids: ["S-05","S-06","S-07","S-08"] as const,                   row: 0, col: 2 },
-  { id: "SC", label: "CAB C", ids: ["S-09","S-10","S-11","S-12"] as const,                   row: 1, col: 1 },
-  { id: "SD", label: "CAB D", ids: ["S-13","S-14","S-15","S-16"] as const,                   row: 1, col: 2 },
-  { id: "SE", label: "CAB E", ids: ["S-17","S-18","S-19","S-20","S-21","S-22"] as const,    row: 2, col: 0 },
-  { id: "SF", label: "CAB F", ids: ["S-23","S-24","S-25"] as const,                           row: 2, col: 2 },
-] as const;
-export const SMOKING_IDS = SMOKING_CABINETS.flatMap(c => [...c.ids]);
-
-export const ZONES_CONFIG = [
-  { zone: "Pared/Carousel", prefix: "P", machines: CAROUSEL_IDS, color: "border-amber-600" },
-  { zone: "Pasillo",        prefix: "Q", machines: PASILLO_IDS,  color: "border-violet-600" },
-  { zone: "Smoking Room",   prefix: "S", machines: SMOKING_IDS,  color: "border-rose-600"   },
-] as const;
-
-export const ALL_MACHINE_IDS = ZONES_CONFIG.flatMap(z => z.machines as readonly string[]);
-
 // ── Helpers ───────────────────────────────────────────────────────
 function getStatusInfo(v: string) { return STATUS_OPTIONS.find(s => s.value === v) ?? STATUS_OPTIONS[0]; }
 function getApInfo(v: string)     { return AP_SIGNAL_OPTIONS.find(a => a.value === v) ?? AP_SIGNAL_OPTIONS[0]; }
+
 function useTheme() {
   const [dark, setDark] = useState(() =>
     document.documentElement.getAttribute("data-theme") === "dark" ||
@@ -187,7 +155,29 @@ function useTheme() {
   return { dark, toggle };
 }
 
-// ── Bulk status button ──────────────────────────────────────────────────────────
+// ── Priority auto-rules ──────────────────────────────────────────
+function computeAutoRules(status: string, playerType: string): { priority: number; alarmAt: string } {
+  if (status === "unplayed" || status === "checked") {
+    return { priority: 0, alarmAt: "" };
+  }
+  if (status === "running_out_of_money") {
+    return { priority: 2, alarmAt: new Date(Date.now() + 5 * 60 * 1000).toISOString() };
+  }
+  if (status === "being_played") {
+    if (playerType === "money_out") {
+      return { priority: 2, alarmAt: new Date(Date.now() + 5 * 60 * 1000).toISOString() };
+    }
+    if (playerType === "high_amount") {
+      return { priority: 2, alarmAt: "" };
+    }
+    if (["long_time","senior","beginner","jumping_bets"].includes(playerType)) {
+      return { priority: 1, alarmAt: "" };
+    }
+  }
+  return { priority: 0, alarmAt: "" };
+}
+
+// ── Bulk status button ──────────────────────────────────────────
 function BulkStatusButton({ sessionId, machines, zone, onDone }: {
   sessionId: number;
   machines: string[];
@@ -251,17 +241,34 @@ function BulkStatusButton({ sessionId, machines, zone, onDone }: {
   );
 }
 
-// ── Unified Machine Tile (used everywhere) ───────────────────────
-// compact=true → smaller height for circular layouts
-function MachineTile({ gridId, machine, onClick, compact = false, style }: {
+// ── Unified Machine Tile ──────────────────────────────────────────
+function MachineTile({ gridId, machine, onClick, compact = false, style, editMode, onRemove }: {
   gridId: string; machine?: Machine; onClick: () => void; compact?: boolean;
   style?: React.CSSProperties;
+  editMode?: boolean;
+  onRemove?: () => void;
 }) {
   const status = machine?.status ?? "unplayed";
   const apInfo = machine ? getApInfo(machine.apSignal) : null;
   const hasSignal = machine && machine.apSignal !== "none";
   const wilds = machine?.wildCount ?? 0;
   const coins = machine?.coinCount ?? 0;
+  const pt = machine?.playerType ?? "";
+  const ptInfo = pt ? PLAYER_TYPE_PILL[pt] : null;
+
+  // Alarm check
+  const [alarmFired, setAlarmFired] = useState(false);
+  useEffect(() => {
+    if (!machine?.alarmAt) { setAlarmFired(false); return; }
+    const check = () => {
+      if (new Date(machine.alarmAt!).getTime() <= Date.now()) setAlarmFired(true);
+      else setAlarmFired(false);
+    };
+    check();
+    const id = setInterval(check, 5000);
+    return () => clearInterval(id);
+  }, [machine?.alarmAt]);
+
   return (
     <button
       onClick={onClick}
@@ -272,12 +279,19 @@ function MachineTile({ gridId, machine, onClick, compact = false, style }: {
         ${STATUS_COLORS[status]}
         ${machine?.priority === 2 ? "ring-2 ring-red-500 ring-offset-1 ring-offset-background" : ""}
         ${machine?.priority === 1 ? "ring-1 ring-yellow-500 ring-offset-1 ring-offset-background" : ""}
+        ${alarmFired ? "ring-2 ring-red-400 animate-pulse" : ""}
         ${compact ? "w-full h-14" : "w-full h-16 sm:h-20"}
       `}
       data-testid={`tile-machine-${gridId}`}
     >
       <span className="text-[10px] font-mono font-bold leading-none">{gridId}</span>
       <span className={`w-2 h-2 rounded-full ${STATUS_DOT[status]}`} />
+      {/* Player type pill */}
+      {ptInfo && (
+        <span className={`text-[7px] font-bold px-1 rounded-sm leading-tight ${ptInfo.bg} ${ptInfo.text} ${ptInfo.pulse ? "animate-pulse" : ""}`}>
+          {ptInfo.abbr}
+        </span>
+      )}
       <div className="flex items-center gap-1 flex-wrap justify-center">
         {wilds > 0 && <span className="flex items-center gap-0.5 text-[8px] font-bold text-yellow-300"><Zap size={7} />{wilds}</span>}
         {coins > 0 && <span className="flex items-center gap-0.5 text-[8px] font-bold text-amber-300"><Coins size={7} />{coins}</span>}
@@ -288,17 +302,27 @@ function MachineTile({ gridId, machine, onClick, compact = false, style }: {
         {status === "played_by_me" && machine?.outcomeType === "lost" && (machine?.outcomeAmount ?? 0) > 0 && (
           <span className="flex items-center gap-0.5 text-[8px] font-bold text-red-300"><TrendingDown size={7} />{machine!.outcomeAmount}</span>
         )}
+        {alarmFired && <Bell size={7} className="text-red-400 animate-pulse" />}
       </div>
       {machine?.statusChangedAt && (
         <LiveTimer statusChangedAt={machine.statusChangedAt} status={status} />
+      )}
+      {editMode && onRemove && (
+        <button
+          onClick={e => { e.stopPropagation(); onRemove(); }}
+          className="absolute -top-1.5 -right-1.5 z-20 w-4 h-4 rounded-full bg-red-600 text-white flex items-center justify-center hover:bg-red-500"
+        >
+          <X size={8} />
+        </button>
       )}
     </button>
   );
 }
 
-// ── Sortable Machine Tile (for intra-cabinet drag) ────────────────
-function SortableMachineTile({ gridId, machine, onClick }: {
+// ── Sortable Machine Tile ─────────────────────────────────────────
+function SortableMachineTile({ gridId, machine, onClick, editMode, onRemove }: {
   gridId: string; machine?: Machine; onClick: () => void;
+  editMode?: boolean; onRemove?: () => void;
 }) {
   const {
     attributes, listeners, setNodeRef,
@@ -315,7 +339,6 @@ function SortableMachineTile({ gridId, machine, onClick }: {
 
   return (
     <div ref={setNodeRef} style={style} className="relative group/tile">
-      {/* Tiny drag handle shown on hover */}
       <div
         {...attributes}
         {...listeners}
@@ -324,13 +347,13 @@ function SortableMachineTile({ gridId, machine, onClick }: {
       >
         <GripVertical size={8} />
       </div>
-      <MachineTile gridId={gridId} machine={machine} onClick={onClick} />
+      <MachineTile gridId={gridId} machine={machine} onClick={onClick} editMode={editMode} onRemove={onRemove} />
     </div>
   );
 }
 
-// ── Cabinet content with intra-cab sortable drag ──────────────────
-function CabinetContent({ cabinetId, machineIds, machineMap, onClickMachine, isDragging = false, cols = 2, onToggleOrientation, label }: {
+// ── Cabinet content ───────────────────────────────────────────────
+function CabinetContent({ cabinetId, machineIds, machineMap, onClickMachine, isDragging = false, cols = 2, onToggleOrientation, label, editMode, onRemoveMachine, onAddMachine, onRenameLabel, onDeleteCabinet }: {
   cabinetId: string;
   machineIds: string[];
   machineMap: Record<string, Machine>;
@@ -339,7 +362,14 @@ function CabinetContent({ cabinetId, machineIds, machineMap, onClickMachine, isD
   cols?: number;
   onToggleOrientation?: () => void;
   label: string;
+  editMode?: boolean;
+  onRemoveMachine?: (id: string) => void;
+  onAddMachine?: () => void;
+  onRenameLabel?: (newLabel: string) => void;
+  onDeleteCabinet?: () => void;
 }) {
+  const [editingLabel, setEditingLabel] = useState(false);
+  const [labelVal, setLabelVal] = useState(label);
 
   return (
     <div className={`
@@ -349,11 +379,26 @@ function CabinetContent({ cabinetId, machineIds, machineMap, onClickMachine, isD
       transition-colors
     `}>
       <div className="absolute -top-2.5 left-1/2 -translate-x-1/2 flex items-center gap-1">
-        <span className="text-[8px] font-bold text-muted-foreground bg-background px-1 rounded">
-          {label}
-        </span>
+        {editMode && !isDragging ? (
+          editingLabel ? (
+            <input
+              autoFocus
+              className="text-[8px] font-bold text-muted-foreground bg-background border border-border px-1 rounded w-16"
+              value={labelVal}
+              onChange={e => setLabelVal(e.target.value)}
+              onBlur={() => { setEditingLabel(false); onRenameLabel?.(labelVal); }}
+              onKeyDown={e => { if (e.key === "Enter") { setEditingLabel(false); onRenameLabel?.(labelVal); } }}
+            />
+          ) : (
+            <span
+              className="text-[8px] font-bold text-muted-foreground bg-background px-1 rounded cursor-pointer hover:text-primary"
+              onClick={() => setEditingLabel(true)}
+            >{label} ✎</span>
+          )
+        ) : (
+          <span className="text-[8px] font-bold text-muted-foreground bg-background px-1 rounded">{label}</span>
+        )}
       </div>
-      {/* Orientation toggle */}
       {onToggleOrientation && !isDragging && (
         <button
           onClick={e => { e.stopPropagation(); onToggleOrientation(); }}
@@ -364,6 +409,15 @@ function CabinetContent({ cabinetId, machineIds, machineMap, onClickMachine, isD
           <span className="font-mono leading-none">{cols}</span>
         </button>
       )}
+      {editMode && !isDragging && onDeleteCabinet && (
+        <button
+          onClick={onDeleteCabinet}
+          className="absolute -top-2.5 -right-2 z-10 w-4 h-4 rounded-full bg-red-700 text-white flex items-center justify-center hover:bg-red-500"
+          title="Delete cabinet"
+        >
+          <X size={8} />
+        </button>
+      )}
       <div className="gap-1 mt-1" style={{ display: "grid", gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
         {machineIds.map(id => (
           <SortableMachineTile
@@ -371,18 +425,28 @@ function CabinetContent({ cabinetId, machineIds, machineMap, onClickMachine, isD
             gridId={id}
             machine={machineMap[id]}
             onClick={isDragging ? () => {} : () => onClickMachine(id)}
+            editMode={editMode}
+            onRemove={editMode ? () => onRemoveMachine?.(id) : undefined}
           />
         ))}
+        {editMode && !isDragging && onAddMachine && (
+          <button
+            onClick={onAddMachine}
+            className="w-full h-16 rounded-lg border-2 border-dashed border-border/50 flex items-center justify-center text-muted-foreground hover:border-primary/50 hover:text-primary transition-colors text-[10px]"
+          >
+            <Plus size={12} />
+          </button>
+        )}
       </div>
     </div>
   );
 }
 
-// ── Position map type ─────────────────────────────────────────────
+// ── Position map ──────────────────────────────────────────────────
 type CabPos = { col: number; row: number };
 type PosMap = Record<string, CabPos>;
 
-const GRID_COLS = 4; // max columns in the cabinet grid
+const GRID_COLS = 4;
 
 const DEFAULT_POSITIONS: PosMap = {
   A: { col: 0, row: 0 },
@@ -393,17 +457,15 @@ const DEFAULT_POSITIONS: PosMap = {
   F: { col: 3, row: 1 },
 };
 
-function parseSavedPositions(raw: string): PosMap | null {
+function parseSavedPositions(raw: string, cabIds: string[]): PosMap | null {
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw);
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
       const keys = Object.keys(parsed);
-      if (keys.length > 0 && "col" in (parsed[keys[0]] ?? {})) {
-        return parsed as PosMap;
-      }
+      if (keys.length > 0 && "col" in (parsed[keys[0]] ?? {})) return parsed as PosMap;
     }
-    if (Array.isArray(parsed) && parsed.length === CAROUSEL_CABINETS.length) {
+    if (Array.isArray(parsed) && parsed.length === cabIds.length) {
       const pos: PosMap = {};
       parsed.forEach((id: string, idx: number) => {
         pos[id] = { col: idx % GRID_COLS, row: Math.floor(idx / GRID_COLS) };
@@ -420,7 +482,7 @@ function parseCabMachineOrder(raw: string | undefined): Record<string, string[]>
 }
 
 // ── Draggable cabinet (inter-cabinet positioning) ─────────────────
-function DraggableCabinet({ cabinetId, machineIds, machineMap, onClickMachine, isDragOverlay = false, cols, onToggleOrientation, label, onSortEnd }: {
+function DraggableCabinet({ cabinetId, machineIds, machineMap, onClickMachine, isDragOverlay = false, cols, onToggleOrientation, label, onSortEnd, editMode, onRemoveMachine, onAddMachine, onRenameLabel, onDeleteCabinet }: {
   cabinetId: string;
   machineIds: string[];
   machineMap: Record<string, Machine>;
@@ -430,6 +492,11 @@ function DraggableCabinet({ cabinetId, machineIds, machineMap, onClickMachine, i
   onToggleOrientation?: () => void;
   label: string;
   onSortEnd: (cabId: string, newOrder: string[]) => void;
+  editMode?: boolean;
+  onRemoveMachine?: (id: string) => void;
+  onAddMachine?: () => void;
+  onRenameLabel?: (newLabel: string) => void;
+  onDeleteCabinet?: () => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: cabinetId });
 
@@ -460,7 +527,6 @@ function DraggableCabinet({ cabinetId, machineIds, machineMap, onClickMachine, i
       style={isDragOverlay ? undefined : style}
       className="relative group"
     >
-      {/* Drag handle for inter-cabinet positioning */}
       <div
         {...attributes}
         {...listeners}
@@ -481,7 +547,6 @@ function DraggableCabinet({ cabinetId, machineIds, machineMap, onClickMachine, i
         drag
       </div>
 
-      {/* Inner sortable context for machine reordering */}
       <DndContext
         sensors={sortSensors}
         collisionDetection={closestCenter}
@@ -497,6 +562,11 @@ function DraggableCabinet({ cabinetId, machineIds, machineMap, onClickMachine, i
             cols={cols}
             onToggleOrientation={isDragOverlay ? undefined : onToggleOrientation}
             label={label}
+            editMode={editMode}
+            onRemoveMachine={onRemoveMachine}
+            onAddMachine={isDragOverlay ? undefined : onAddMachine}
+            onRenameLabel={onRenameLabel}
+            onDeleteCabinet={onDeleteCabinet}
           />
         </SortableContext>
       </DndContext>
@@ -528,24 +598,26 @@ function GridCell({ cellId, occupied, isOver, children }: {
   );
 }
 
-// ── Circular machines layout (Carousel P-25..P-32) ────────────────
+// ── Circular layouts ──────────────────────────────────────────────
 const TILE_W = 72;
 const TILE_H = 80;
 const RADIUS = 140;
 const CIRCLE_SIZE = (RADIUS + TILE_H) * 2;
 
-// Compact circular layout for Pasillo CAB C
 const SMALL_TILE_W = 64;
 const SMALL_TILE_H = 72;
 const SMALL_RADIUS = 58;
 const SMALL_CIRCLE_SIZE = (SMALL_RADIUS + SMALL_TILE_H) * 2 + 4;
 
-function SmallCircularCabinet({ label, ids, machineMap, onClickMachine, color }: {
+function SmallCircularCabinet({ label, ids, machineMap, onClickMachine, color, editMode, onRemoveMachine, onAddMachine }: {
   label: string;
   ids: readonly string[];
   machineMap: Record<string, Machine>;
   onClickMachine: (id: string) => void;
   color: string;
+  editMode?: boolean;
+  onRemoveMachine?: (id: string) => void;
+  onAddMachine?: () => void;
 }) {
   const n = ids.length;
   const startAngle = -Math.PI / 2;
@@ -554,30 +626,11 @@ function SmallCircularCabinet({ label, ids, machineMap, onClickMachine, color }:
     <div className={`border-2 ${color}/40 rounded-xl p-2 bg-card/20 flex flex-col items-center`}>
       <p className="text-[9px] font-bold text-muted-foreground uppercase tracking-widest mb-1 text-center">{label}</p>
       <div className="relative" style={{ width: SMALL_CIRCLE_SIZE, height: SMALL_CIRCLE_SIZE }}>
-        <svg
-          className="absolute inset-0 pointer-events-none"
-          width={SMALL_CIRCLE_SIZE}
-          height={SMALL_CIRCLE_SIZE}
-        >
-          <circle
-            cx={SMALL_CIRCLE_SIZE / 2}
-            cy={SMALL_CIRCLE_SIZE / 2}
-            r={SMALL_RADIUS}
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1"
-            strokeDasharray="3 5"
-            className="text-border/40"
-          />
-          <text
-            x={SMALL_CIRCLE_SIZE / 2}
-            y={SMALL_CIRCLE_SIZE / 2 + 4}
-            textAnchor="middle"
-            className="fill-muted-foreground"
-            fontSize="8"
-            fontFamily="monospace"
-            opacity="0.4"
-          >CAB C</text>
+        <svg className="absolute inset-0 pointer-events-none" width={SMALL_CIRCLE_SIZE} height={SMALL_CIRCLE_SIZE}>
+          <circle cx={SMALL_CIRCLE_SIZE / 2} cy={SMALL_CIRCLE_SIZE / 2} r={SMALL_RADIUS}
+            fill="none" stroke="currentColor" strokeWidth="1" strokeDasharray="3 5" className="text-border/40" />
+          <text x={SMALL_CIRCLE_SIZE / 2} y={SMALL_CIRCLE_SIZE / 2 + 4} textAnchor="middle"
+            className="fill-muted-foreground" fontSize="8" fontFamily="monospace" opacity="0.4">CAB C</text>
         </svg>
         {ids.map((id, i) => {
           const angle = startAngle + (2 * Math.PI * i) / n;
@@ -590,6 +643,8 @@ function SmallCircularCabinet({ label, ids, machineMap, onClickMachine, color }:
               machine={machineMap[id]}
               onClick={() => onClickMachine(id)}
               compact
+              editMode={editMode}
+              onRemove={editMode ? () => onRemoveMachine?.(id) : undefined}
               style={{
                 position: "absolute",
                 left: cx - SMALL_TILE_W / 2,
@@ -601,50 +656,33 @@ function SmallCircularCabinet({ label, ids, machineMap, onClickMachine, color }:
           );
         })}
       </div>
+      {editMode && onAddMachine && (
+        <button onClick={onAddMachine} className="mt-1 text-[9px] text-primary hover:underline">+ Add slot</button>
+      )}
     </div>
   );
 }
 
-function CircularMachines({ ids, machineMap, onClickMachine }: {
+function CircularMachines({ ids, machineMap, onClickMachine, editMode, onRemoveMachine, onAddMachine }: {
   ids: string[];
   machineMap: Record<string, Machine>;
   onClickMachine: (id: string) => void;
+  editMode?: boolean;
+  onRemoveMachine?: (id: string) => void;
+  onAddMachine?: () => void;
 }) {
   const n = ids.length;
   const startAngle = -Math.PI / 2;
 
   return (
-    <div className="flex justify-center">
-      <div
-        className="relative"
-        style={{ width: CIRCLE_SIZE, height: CIRCLE_SIZE }}
-      >
-        <svg
-          className="absolute inset-0 pointer-events-none"
-          width={CIRCLE_SIZE}
-          height={CIRCLE_SIZE}
-        >
-          <circle
-            cx={CIRCLE_SIZE / 2}
-            cy={CIRCLE_SIZE / 2}
-            r={RADIUS}
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1"
-            strokeDasharray="4 6"
-            className="text-border/40"
-          />
-          <text
-            x={CIRCLE_SIZE / 2}
-            y={CIRCLE_SIZE / 2 + 5}
-            textAnchor="middle"
-            className="fill-muted-foreground"
-            fontSize="10"
-            fontFamily="monospace"
-            opacity="0.4"
-          >CAROUSEL</text>
+    <div className="flex justify-center flex-col items-center">
+      <div className="relative" style={{ width: CIRCLE_SIZE, height: CIRCLE_SIZE }}>
+        <svg className="absolute inset-0 pointer-events-none" width={CIRCLE_SIZE} height={CIRCLE_SIZE}>
+          <circle cx={CIRCLE_SIZE / 2} cy={CIRCLE_SIZE / 2} r={RADIUS}
+            fill="none" stroke="currentColor" strokeWidth="1" strokeDasharray="4 6" className="text-border/40" />
+          <text x={CIRCLE_SIZE / 2} y={CIRCLE_SIZE / 2 + 5} textAnchor="middle"
+            className="fill-muted-foreground" fontSize="10" fontFamily="monospace" opacity="0.4">CAROUSEL</text>
         </svg>
-
         {ids.map((id, i) => {
           const angle = startAngle + (2 * Math.PI * i) / n;
           const cx = CIRCLE_SIZE / 2 + RADIUS * Math.cos(angle);
@@ -655,6 +693,8 @@ function CircularMachines({ ids, machineMap, onClickMachine }: {
               gridId={id}
               machine={machineMap[id]}
               onClick={() => onClickMachine(id)}
+              editMode={editMode}
+              onRemove={editMode ? () => onRemoveMachine?.(id) : undefined}
               style={{
                 position: "absolute",
                 left: cx - TILE_W / 2,
@@ -666,199 +706,10 @@ function CircularMachines({ ids, machineMap, onClickMachine }: {
           );
         })}
       </div>
+      {editMode && onAddMachine && (
+        <button onClick={onAddMachine} className="mt-2 text-xs text-primary hover:underline">+ Add carousel slot</button>
+      )}
     </div>
-  );
-}
-
-// ── Carousel section with 2D grid drag ───────────────────────────
-function CarouselSection({
-  machineMap, onClickMachine, sessionId, savedCabinetOrder, cabMachineOrder, onSortEnd,
-}: {
-  machineMap: Record<string, Machine>; onClickMachine: (id: string) => void;
-  sessionId: number; savedCabinetOrder: string;
-  cabMachineOrder: Record<string, string[]>;
-  onSortEnd: (cabId: string, newOrder: string[]) => void;
-}) {
-  const { toast } = useToast();
-
-  const [positions, setPositions] = useState<PosMap>(() =>
-    parseSavedPositions(savedCabinetOrder) ?? DEFAULT_POSITIONS
-  );
-
-  const [cabOrientations, setCabOrientations] = useState<Record<string, number>>({});
-  const toggleOrientation = useCallback((cabId: string) => {
-    setCabOrientations(prev => { const cur = prev[cabId] ?? 2; return { ...prev, [cabId]: cur >= 3 ? 1 : cur + 1 }; });
-  }, []);
-
-  useEffect(() => {
-    const parsed = parseSavedPositions(savedCabinetOrder);
-    if (parsed) setPositions(parsed);
-  }, [savedCabinetOrder]);
-
-  const [activeDragId, setActiveDragId] = useState<string | null>(null);
-  const [overCellId, setOverCellId] = useState<string | null>(null);
-
-  const savePositionsMutation = useMutation({
-    mutationFn: (pos: PosMap) =>
-      apiRequest("PUT", `/api/sessions/${sessionId}/cabinet-order`, { positions: pos }).then(r => r.json()),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/sessions", sessionId] });
-    },
-    onError: () => toast({ title: "Failed to save layout", variant: "destructive" }),
-  });
-
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
-    useSensor(TouchSensor,   { activationConstraint: { delay: 200, tolerance: 5 } })
-  );
-
-  const handleDragStart = useCallback((event: DragStartEvent) => {
-    setActiveDragId(String(event.active.id));
-  }, []);
-
-  const handleDragOver = useCallback((event: DragOverEvent) => {
-    setOverCellId(event.over ? String(event.over.id) : null);
-  }, []);
-
-  const handleDragEnd = useCallback((event: DragEndEvent) => {
-    const draggedId = String(event.active.id);
-    setActiveDragId(null);
-    setOverCellId(null);
-
-    if (!event.over) return;
-    const overId = String(event.over.id);
-
-    setPositions(prev => {
-      const next = { ...prev };
-      let targetPos: CabPos;
-      if (overId.includes(":")) {
-        const [col, row] = overId.split(":").map(Number);
-        targetPos = { col, row };
-      } else {
-        const targetCabPos = prev[overId];
-        if (!targetCabPos) return prev;
-        targetPos = targetCabPos;
-        next[overId] = prev[draggedId];
-      }
-      next[draggedId] = targetPos;
-      savePositionsMutation.mutate(next);
-      return next;
-    });
-  }, [savePositionsMutation]);
-
-  const maxRow = Math.max(...Object.values(positions).map(p => p.row), 1);
-  const rows = maxRow + 1;
-
-  const cellToCab = useMemo(() => {
-    const map: Record<string, string> = {};
-    Object.entries(positions).forEach(([cabId, pos]) => {
-      map[`${pos.col}:${pos.row}`] = cabId;
-    });
-    return map;
-  }, [positions]);
-
-  const hotCount = 0;
-
-  return (
-    <section data-testid="zone-section-Pared/Carousel">
-      <div className="flex items-center gap-2 mb-5">
-        <div className="h-4 w-1 rounded-full bg-amber-500" />
-        <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Pared / Carousel</h2>
-        <span className="text-[10px] text-muted-foreground">({CAROUSEL_IDS.length} machines)</span>
-        <span className="text-[9px] text-muted-foreground/60 flex items-center gap-1 ml-1">
-          <GripVertical size={9} /> drag cabinets · drag machines inside
-        </span>
-        <div className="ml-auto flex items-center gap-2">
-          {hotCount > 0 && (
-            <Badge variant="outline" className="border-red-500 text-red-400 text-[9px] px-1.5 py-0 h-4">
-              {hotCount} AP
-            </Badge>
-          )}
-          <BulkStatusButton
-            sessionId={sessionId}
-            machines={CAROUSEL_IDS as unknown as string[]}
-            zone="Pared/Carousel"
-            onDone={() => {}}
-          />
-        </div>
-      </div>
-
-      <DndContext
-        sensors={sensors}
-        collisionDetection={closestCenter}
-        onDragStart={handleDragStart}
-        onDragOver={handleDragOver}
-        onDragEnd={handleDragEnd}
-      >
-        <div
-          className="grid gap-6 pb-2"
-          style={{
-            gridTemplateColumns: `repeat(${GRID_COLS}, minmax(0, 1fr))`,
-          }}
-        >
-          {Array.from({ length: rows * GRID_COLS }).map((_, idx) => {
-            const col = idx % GRID_COLS;
-            const row = Math.floor(idx / GRID_COLS);
-            const cellKey = `${col}:${row}`;
-            const cabId = cellToCab[cellKey];
-            const cabDef = CAROUSEL_CABINETS.find(c => c.id === cabId);
-            const machineIds = cabId ? (cabMachineOrder[cabId] ?? [...(cabDef?.ids ?? [])]) : [];
-            return (
-              <GridCell
-                key={cellKey}
-                cellId={cabId ?? cellKey}
-                occupied={!!cabId}
-                isOver={overCellId === (cabId ?? cellKey)}
-              >
-                {cabId && cabDef && (
-                  <DraggableCabinet
-                    cabinetId={cabId}
-                    machineIds={machineIds}
-                    machineMap={machineMap}
-                    onClickMachine={onClickMachine}
-                    cols={cabOrientations[cabId] ?? 2}
-                    onToggleOrientation={() => toggleOrientation(cabId)}
-                    label={cabDef.label}
-                    onSortEnd={onSortEnd}
-                  />
-                )}
-              </GridCell>
-            );
-          })}
-        </div>
-
-        <DragOverlay dropAnimation={{ duration: 180, easing: "ease" }}>
-          {activeDragId ? (() => {
-            const cabDef = CAROUSEL_CABINETS.find(c => c.id === activeDragId);
-            const machineIds = cabMachineOrder[activeDragId] ?? [...(cabDef?.ids ?? [])];
-            return (
-              <DraggableCabinet
-                cabinetId={activeDragId}
-                machineIds={machineIds}
-                machineMap={machineMap}
-                onClickMachine={() => {}}
-                isDragOverlay
-                cols={cabOrientations[activeDragId] ?? 2}
-                label={cabDef?.label ?? activeDragId}
-                onSortEnd={() => {}}
-              />
-            );
-          })() : null}
-        </DragOverlay>
-      </DndContext>
-
-      {/* Carousel — circular layout */}
-      <div className="mt-8">
-        <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium mb-4 ml-1">
-          Carousel
-        </p>
-        <CircularMachines
-          ids={ARC_MACHINES}
-          machineMap={machineMap}
-          onClickMachine={onClickMachine}
-        />
-      </div>
-    </section>
   );
 }
 
@@ -880,9 +731,29 @@ function MachineEditor({ open, onClose, gridId, zone, sessionId, existing }: {
   const [outcomeType, setOutcomeType] = useState<"won"|"lost"|"">(existing?.outcomeType as "won"|"lost"|"" ?? "");
   const [outcomeAmount, setOutcomeAmount] = useState<string>(existing?.outcomeAmount ? String(existing.outcomeAmount) : "");
   const [playerType, setPlayerType] = useState<string>(existing?.playerType ?? "");
+  // Machine type search
+  const [typeSearch, setTypeSearch] = useState("");
+  const [showAddType, setShowAddType] = useState(false);
+  const [newTypeName, setNewTypeName] = useState("");
 
   const savedStatus = existing?.status ?? "unplayed";
   const elapsed = useElapsedTimer(existing?.statusChangedAt);
+
+  const { data: machineTypes = [] } = useQuery<MachineType[]>({
+    queryKey: ["/api/machine-types"],
+  });
+
+  const addTypeMutation = useMutation({
+    mutationFn: (name: string) => apiRequest("POST", "/api/machine-types", { name }).then(r => r.json()),
+    onSuccess: (newType: MachineType) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/machine-types"] });
+      setMachineType(newType.name);
+      setShowAddType(false);
+      setNewTypeName("");
+      toast({ title: `Added machine type: ${newType.name}` });
+    },
+    onError: () => toast({ title: "Type already exists", variant: "destructive" }),
+  });
 
   useMemo(() => {
     setStatus(existing?.status ?? "unplayed");
@@ -897,17 +768,24 @@ function MachineEditor({ open, onClose, gridId, zone, sessionId, existing }: {
     setOutcomeType(existing?.outcomeType as "won"|"lost"|"" ?? "");
     setOutcomeAmount(existing?.outcomeAmount ? String(existing.outcomeAmount) : "");
     setPlayerType(existing?.playerType ?? "");
+    setTypeSearch("");
+    setShowAddType(false);
   }, [existing?.id, open]);
 
   const saveMutation = useMutation({
-    mutationFn: () =>
-      apiRequest("PUT", `/api/sessions/${sessionId}/machines/upsert`, {
+    mutationFn: () => {
+      const autoRules = computeAutoRules(status, status === "being_played" ? playerType : "");
+      return apiRequest("PUT", `/api/sessions/${sessionId}/machines/upsert`, {
         machineNumber: gridId, zone, machineType, status, apSignal,
-        wildCount, coinCount, betLevel, playerState, priority, notes,
+        wildCount, coinCount, betLevel, playerState,
+        priority: autoRules.priority,
+        alarmAt: autoRules.alarmAt,
+        notes,
         outcomeType: status === "played_by_me" ? outcomeType : "",
         outcomeAmount: status === "played_by_me" ? (parseFloat(outcomeAmount) || 0) : 0,
         playerType: status === "being_played" ? playerType : "",
-      }).then(r => r.json()),
+      }).then(r => r.json());
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/sessions", sessionId, "machines"] });
       toast({ title: `Machine ${gridId} saved` });
@@ -924,6 +802,13 @@ function MachineEditor({ open, onClose, gridId, zone, sessionId, existing }: {
       onClose();
     },
   });
+
+  const filteredTypes = machineTypes.filter(t =>
+    t.name.toLowerCase().includes(typeSearch.toLowerCase())
+  );
+
+  // Compute what auto-priority will be set to (for display)
+  const autoRulesPreview = computeAutoRules(status, status === "being_played" ? playerType : "");
 
   return (
     <Sheet open={open} onOpenChange={o => !o && onClose()}>
@@ -958,14 +843,59 @@ function MachineEditor({ open, onClose, gridId, zone, sessionId, existing }: {
             </div>
           )}
 
+          {/* Machine Type with search */}
           <div>
             <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 block">Machine Type</label>
-            <Select value={machineType} onValueChange={setMachineType}>
-              <SelectTrigger data-testid="select-machine-type"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {MACHINE_TYPES.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
-              </SelectContent>
-            </Select>
+            <div className="border border-border rounded-lg overflow-hidden">
+              <div className="relative">
+                <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                <input
+                  placeholder="Search types…"
+                  value={typeSearch}
+                  onChange={e => setTypeSearch(e.target.value)}
+                  className="w-full bg-muted/20 pl-7 pr-3 py-1.5 text-xs focus:outline-none border-b border-border"
+                />
+              </div>
+              <div className="max-h-32 overflow-y-auto">
+                {filteredTypes.map(t => (
+                  <button
+                    key={t.id}
+                    onClick={() => { setMachineType(t.name); setTypeSearch(""); }}
+                    className={`w-full text-left px-3 py-1.5 text-xs hover:bg-muted/60 transition-colors flex items-center justify-between ${
+                      machineType === t.name ? "bg-primary/10 text-primary font-semibold" : "text-muted-foreground"
+                    }`}
+                  >
+                    {t.name}
+                    {t.isCustom === 1 && <span className="text-[9px] text-primary/60 border border-primary/30 rounded px-1">custom</span>}
+                  </button>
+                ))}
+                {filteredTypes.length === 0 && (
+                  <p className="text-[10px] text-muted-foreground px-3 py-2">No types found</p>
+                )}
+              </div>
+              {showAddType ? (
+                <div className="border-t border-border flex gap-1 p-1">
+                  <input
+                    autoFocus
+                    placeholder="New type name…"
+                    value={newTypeName}
+                    onChange={e => setNewTypeName(e.target.value)}
+                    onKeyDown={e => { if (e.key === "Enter" && newTypeName.trim()) addTypeMutation.mutate(newTypeName.trim()); }}
+                    className="flex-1 bg-transparent text-xs px-2 py-1 focus:outline-none"
+                  />
+                  <Button size="sm" className="h-6 text-[10px]" onClick={() => newTypeName.trim() && addTypeMutation.mutate(newTypeName.trim())} disabled={addTypeMutation.isPending}>Add</Button>
+                  <Button size="sm" variant="ghost" className="h-6 text-[10px]" onClick={() => setShowAddType(false)}>✕</Button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setShowAddType(true)}
+                  className="w-full border-t border-border text-[10px] text-primary py-1.5 hover:bg-primary/5 transition-colors"
+                >+ Add new type…</button>
+              )}
+            </div>
+            {machineType && (
+              <p className="text-[10px] text-muted-foreground mt-1">Selected: <span className="font-semibold text-foreground">{machineType}</span></p>
+            )}
           </div>
 
           <div>
@@ -981,7 +911,6 @@ function MachineEditor({ open, onClose, gridId, zone, sessionId, existing }: {
                   key={s.value}
                   onClick={() => {
                     setStatus(s.value);
-                    if (s.value === "unplayed" || s.value === "checked") setPriority(0);
                     if (s.value !== "being_played") setPlayerType("");
                     if (s.value !== "played_by_me") { setOutcomeType(""); setOutcomeAmount(""); }
                   }}
@@ -1001,6 +930,20 @@ function MachineEditor({ open, onClose, gridId, zone, sessionId, existing }: {
             </div>
           </div>
 
+          {/* Priority preview (auto-computed) */}
+          {(status === "being_played" || status === "running_out_of_money") && (
+            <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2">
+              <Bell size={12} className="text-muted-foreground" />
+              <div className="flex-1">
+                <p className="text-[10px] text-muted-foreground">Auto priority</p>
+                <p className="text-xs font-bold">
+                  {autoRulesPreview.priority === 2 ? "🔥 High" : autoRulesPreview.priority === 1 ? "⚠ Watch" : "Normal"}
+                  {autoRulesPreview.alarmAt && <span className="ml-2 text-orange-400 text-[10px]">+ 5min alarm</span>}
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* Being Played prompt */}
           {status === "being_played" && (
             <div className="rounded-lg border border-blue-700/50 bg-blue-950/30 p-4 space-y-2">
@@ -1008,20 +951,26 @@ function MachineEditor({ open, onClose, gridId, zone, sessionId, existing }: {
                 <Users size={12} /> Player Type
               </p>
               <div className="grid grid-cols-2 gap-1.5">
-                {BEING_PLAYED_OPTIONS.map(opt => (
-                  <button
-                    key={opt.value}
-                    onClick={() => setPlayerType(playerType === opt.value ? "" : opt.value)}
-                    className={`rounded-md border px-2.5 py-2 text-xs font-medium transition-all text-left ${
-                      playerType === opt.value
-                        ? "bg-blue-600 border-blue-400 text-white"
-                        : "border-border text-muted-foreground hover:border-blue-500 hover:text-blue-300"
-                    }`}
-                    data-testid={`btn-player-type-${opt.value}`}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
+                {BEING_PLAYED_OPTIONS.map(opt => {
+                  const ptInfo = PLAYER_TYPE_PILL[opt.value];
+                  return (
+                    <button
+                      key={opt.value}
+                      onClick={() => setPlayerType(playerType === opt.value ? "" : opt.value)}
+                      className={`rounded-md border px-2.5 py-2 text-xs font-medium transition-all text-left flex items-center gap-2 ${
+                        playerType === opt.value
+                          ? "bg-blue-600 border-blue-400 text-white"
+                          : "border-border text-muted-foreground hover:border-blue-500 hover:text-blue-300"
+                      }`}
+                      data-testid={`btn-player-type-${opt.value}`}
+                    >
+                      {ptInfo && (
+                        <span className={`text-[8px] font-bold px-1 py-0.5 rounded ${ptInfo.bg} ${ptInfo.text}`}>{ptInfo.abbr}</span>
+                      )}
+                      {opt.label}
+                    </button>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -1123,22 +1072,6 @@ function MachineEditor({ open, onClose, gridId, zone, sessionId, existing }: {
           <Separator />
 
           <div>
-            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 block">Priority</label>
-            <div className="flex gap-2">
-              {[{value:0,label:"Normal"},{value:1,label:"⚠ Watch"},{value:2,label:"🔥 High"}].map(p => (
-                <button
-                  key={p.value}
-                  onClick={() => setPriority(p.value)}
-                  className={`flex-1 rounded-lg border px-2 py-2 text-xs font-medium transition-all ${
-                    priority === p.value ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:border-primary/50"
-                  }`}
-                  data-testid={`btn-priority-${p.value}`}
-                >{p.label}</button>
-              ))}
-            </div>
-          </div>
-
-          <div>
             <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 block">Last Known Bet Level</label>
             <Select value={betLevel || "unknown"} onValueChange={v => setBetLevel(v === "unknown" ? "" : v)}>
               <SelectTrigger data-testid="select-bet-level"><SelectValue placeholder="Unknown" /></SelectTrigger>
@@ -1213,7 +1146,7 @@ function StatsBar({ machines }: { machines: Machine[] }) {
   );
 }
 
-// ── Break Modal ────────────────────────────────────────────────────
+// ── Break Modal ───────────────────────────────────────────────────
 function BreakModal({ onStart, onClose }: {
   onStart: (type: BreakType) => void;
   onClose: () => void;
@@ -1226,41 +1159,29 @@ function BreakModal({ onStart, onClose }: {
           <p className="text-xs text-muted-foreground mt-0.5">Select the type of break</p>
         </div>
         <div className="flex flex-col gap-2">
-          <button
-            onClick={() => onStart("smoke")}
+          <button onClick={() => onStart("smoke")}
             className="flex items-center gap-3 w-full border border-border rounded-xl px-4 py-3 text-sm font-medium hover:bg-muted/40 hover:border-amber-500/60 transition-all"
-            data-testid="btn-break-smoke"
-          >
-            <CircleDot size={16} className="text-amber-400" />
-            🚬 Smoke Break
+            data-testid="btn-break-smoke">
+            <CircleDot size={16} className="text-amber-400" /> 🚬 Smoke Break
           </button>
-          <button
-            onClick={() => onStart("food")}
+          <button onClick={() => onStart("food")}
             className="flex items-center gap-3 w-full border border-border rounded-xl px-4 py-3 text-sm font-medium hover:bg-muted/40 hover:border-emerald-500/60 transition-all"
-            data-testid="btn-break-food"
-          >
-            <Utensils size={16} className="text-emerald-400" />
-            🍽 Food Break
+            data-testid="btn-break-food">
+            <Utensils size={16} className="text-emerald-400" /> 🍽 Food Break
           </button>
-          <button
-            onClick={() => onStart("other")}
+          <button onClick={() => onStart("other")}
             className="flex items-center gap-3 w-full border border-border rounded-xl px-4 py-3 text-sm font-medium hover:bg-muted/40 hover:border-violet-500/60 transition-all"
-            data-testid="btn-break-other"
-          >
-            <Pause size={16} className="text-violet-400" />
-            Other
+            data-testid="btn-break-other">
+            <Pause size={16} className="text-violet-400" /> Other
           </button>
         </div>
-        <button
-          onClick={onClose}
-          className="w-full border border-border rounded-lg py-2 text-xs text-muted-foreground hover:bg-muted/40"
-        >Cancel</button>
+        <button onClick={onClose} className="w-full border border-border rounded-lg py-2 text-xs text-muted-foreground hover:bg-muted/40">Cancel</button>
       </div>
     </div>
   );
 }
 
-// ── Session timer ──────────────────────────────────────────────────
+// ── Session timer ─────────────────────────────────────────────────
 function SessionTimer({ startedAt }: { startedAt?: string }) {
   const elapsed = useElapsedTimer(startedAt);
   if (!startedAt) return null;
@@ -1272,468 +1193,16 @@ function SessionTimer({ startedAt }: { startedAt?: string }) {
   );
 }
 
-// ── Main page ─────────────────────────────────────────────────────
-export default function FloorMap() {
-  const params = useParams<{ id: string }>();
-  const sessionId = Number(params.id);
-  const { dark, toggle } = useTheme();
-  const [filterStatus, setFilterStatus] = useState<string>("all");
-  const [search, setSearch] = useState("");
-  const [selectedGrid, setSelectedGrid] = useState<{ id: string; zone: string } | null>(null);
-  const [activeZone, setActiveZone] = useState<string>("all");
-  const [showStartModal, setShowStartModal] = useState(false);
-  const [showFinishModal, setShowFinishModal] = useState(false);
-  const [startInput, setStartInput] = useState("");
-  const [finishInput, setFinishInput] = useState("");
-  const [amountPromptShown, setAmountPromptShown] = useState(false);
-  const [showBreakModal, setShowBreakModal] = useState(false);
-  const [showReport, setShowReport] = useState(false);
-  // Per-cabinet machine order: { cabId: string[] }
-  const [cabMachineOrder, setCabMachineOrder] = useState<Record<string, string[]>>({});
-  const { toast } = useToast();
-
-  const { data: session } = useQuery<Session>({
-    queryKey: ["/api/sessions", sessionId],
-    queryFn: () => apiRequest("GET", `/api/sessions/${sessionId}`).then(r => r.json()),
-  });
-
-  const { data: machines = [], isLoading } = useQuery<Machine[]>({
-    queryKey: ["/api/sessions", sessionId, "machines"],
-    queryFn: () => apiRequest("GET", `/api/sessions/${sessionId}/machines`).then(r => r.json()),
-    refetchInterval: 30000,
-  });
-
-  const machineMap = useMemo(() => {
-    const m: Record<string, Machine> = {};
-    for (const machine of machines) m[machine.machineNumber] = machine;
-    return m;
-  }, [machines]);
-
-  // Load saved cab machine order from session
-  useEffect(() => {
-    if (session?.cabMachineOrder) {
-      const parsed = parseCabMachineOrder(session.cabMachineOrder);
-      if (Object.keys(parsed).length > 0) setCabMachineOrder(parsed);
-    }
-  }, [session?.id]);
-
-  const updateSessionMutation = useMutation({
-    mutationFn: (data: Record<string, unknown>) =>
-      apiRequest("PATCH", `/api/sessions/${sessionId}`, data).then(r => r.json()),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/sessions", sessionId] });
-    },
-  });
-
-  // Auto-set startedAt when session loads (if not set)
-  useEffect(() => {
-    if (session && !session.startedAt) {
-      updateSessionMutation.mutate({ startedAt: new Date().toISOString() });
-    }
-  }, [session?.id]);
-
-  // Auto-prompt starting amount once session loads and has none set
-  useEffect(() => {
-    if (session && !amountPromptShown && (session.startingAmount ?? 0) === 0) {
-      setAmountPromptShown(true);
-      setShowStartModal(true);
-    }
-  }, [session?.id]);
-
-  // Breaks
-  const breaks = useMemo(() => parseBreaks(session?.breaks), [session?.breaks]);
-  const activeBreak = breaks.find(b => !b.endedAt) ?? null;
-
-  function startBreak(type: BreakType) {
-    const newBreak: BreakEntry = { type, startedAt: new Date().toISOString(), endedAt: null };
-    const newBreaks = [...breaks, newBreak];
-    updateSessionMutation.mutate({ breaks: JSON.stringify(newBreaks) });
-    setShowBreakModal(false);
-    toast({ title: `Break started — ${type === "smoke" ? "🚬 Smoke" : type === "food" ? "🍽 Food" : "Other"}` });
-  }
-
-  function endBreak() {
-    const newBreaks = breaks.map(b =>
-      !b.endedAt ? { ...b, endedAt: new Date().toISOString() } : b
-    );
-    updateSessionMutation.mutate({ breaks: JSON.stringify(newBreaks) });
-    toast({ title: "Break ended — back to the floor!" });
-  }
-
-  // Save cab machine order to DB
-  function handleSortEnd(cabId: string, newOrder: string[]) {
-    const updated = { ...cabMachineOrder, [cabId]: newOrder };
-    setCabMachineOrder(updated);
-    updateSessionMutation.mutate({ cabMachineOrder: JSON.stringify(updated) });
-  }
-
-  const savedCabinetOrder = session?.cabinetOrder ?? "";
-
-  const selectedMachine = selectedGrid ? machineMap[selectedGrid.id] : undefined;
-
-  function getZoneForId(id: string): string {
-    for (const z of ZONES_CONFIG) {
-      if ((z.machines as readonly string[]).includes(id)) return z.zone;
-    }
-    return "Other";
-  }
-
-  function handleClickMachine(id: string) {
-    setSelectedGrid({ id, zone: getZoneForId(id) });
-  }
-
-  function shouldShowMachine(id: string): boolean {
-    if (search && !id.toLowerCase().includes(search.toLowerCase())) return false;
-    if (filterStatus !== "all") {
-      const m = machineMap[id];
-      if (!m && filterStatus !== "unplayed") return false;
-      if (m && m.status !== filterStatus) return false;
-    }
-    return true;
-  }
-
-  const zoneColorMap = useMemo(() => {
-    const m: Record<string, string> = {};
-    for (const z of ZONES_CONFIG) m[z.zone] = z.color;
-    return m;
-  }, []);
-
-  const standardZones = ZONES_CONFIG.filter(z => z.zone !== "Pared/Carousel");
-  const showCarousel = activeZone === "all" || activeZone === "Pared/Carousel";
-
-  return (
-    <div className="min-h-screen bg-background flex flex-col" data-testid="floor-map-page">
-      <header className="border-b border-border bg-card sticky top-0 z-20">
-        <div className="px-3 py-2.5 flex items-center gap-3">
-          <Link href="/">
-            <Button size="icon" variant="ghost" className="h-8 w-8 shrink-0" data-testid="btn-back">
-              <ArrowLeft size={16} />
-            </Button>
-          </Link>
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold truncate">{session?.name ?? "Loading…"}</p>
-            <div className="flex items-center gap-2">
-              <p className="text-[10px] text-muted-foreground">{session?.date} · Parisian Macao</p>
-              {session?.startedAt && <SessionTimer startedAt={session.startedAt} />}
-            </div>
-          </div>
-          <StatsBar machines={machines} />
-
-          {/* Break button */}
-          {activeBreak ? (
-            <Button
-              size="sm" variant="outline"
-              className="h-7 text-[11px] border-amber-500 text-amber-400 bg-amber-950/30 hover:bg-amber-950/60 shrink-0 gap-1 animate-pulse"
-              onClick={endBreak}
-              data-testid="btn-end-break"
-            >
-              <Play size={10} />
-              Resume
-            </Button>
-          ) : (
-            <Button
-              size="sm" variant="outline"
-              className="h-7 text-[11px] border-border text-muted-foreground hover:bg-muted/40 hover:border-amber-500/60 shrink-0 gap-1"
-              onClick={() => setShowBreakModal(true)}
-              data-testid="btn-start-break"
-            >
-              <Pause size={10} />
-              Break
-            </Button>
-          )}
-
-          <Button
-            size="sm" variant="outline"
-            className="h-7 text-[11px] border-amber-600 text-amber-400 hover:bg-amber-950/40 shrink-0"
-            onClick={() => { setFinishInput(String(session?.finishedAmount || "")); setShowFinishModal(true); }}
-            data-testid="btn-finish-session"
-          >
-            Finish
-          </Button>
-          <Button size="icon" variant="ghost" className="h-8 w-8 shrink-0" onClick={() => setShowReport(true)} data-testid="btn-session-report" title="Session Report">
-            <FileText size={15} />
-          </Button>
-          <Button size="icon" variant="ghost" className="h-8 w-8 shrink-0" onClick={toggle} data-testid="btn-theme-toggle-map">
-            {dark ? <Sun size={15} /> : <Moon size={15} />}
-          </Button>
-        </div>
-
-        {/* Active break banner */}
-        {activeBreak && (
-          <div className="px-3 pb-1.5">
-            <div className="flex items-center gap-2 bg-amber-950/40 border border-amber-500/40 rounded-lg px-3 py-1.5">
-              <span className="text-[10px] text-amber-400 font-semibold">
-                {activeBreak.type === "smoke" ? "🚬 Smoke break" : activeBreak.type === "food" ? "🍽 Food break" : "⏸ Break"} in progress
-              </span>
-              <BreakElapsed startedAt={activeBreak.startedAt} />
-              <button onClick={endBreak} className="ml-auto text-[9px] text-amber-400 hover:text-amber-300 font-bold">END BREAK</button>
-            </div>
-          </div>
-        )}
-
-        <div className="px-3 pb-2.5 space-y-2">
-          <div className="flex gap-1.5 overflow-x-auto no-scrollbar">
-            <button
-              onClick={() => setActiveZone("all")}
-              className={`shrink-0 text-xs px-3 py-1 rounded-full border font-medium transition-all ${
-                activeZone === "all" ? "bg-primary text-primary-foreground border-primary" : "border-border text-muted-foreground hover:border-primary/50"
-              }`}
-              data-testid="zone-tab-all"
-            >All Zones</button>
-            {ZONES_CONFIG.map(z => {
-              const hasHot = false;
-              return (
-                <button
-                  key={z.zone}
-                  onClick={() => setActiveZone(z.zone)}
-                  className={`shrink-0 text-xs px-3 py-1 rounded-full border font-medium transition-all flex items-center gap-1.5 ${
-                    activeZone === z.zone ? "bg-primary text-primary-foreground border-primary" : "border-border text-muted-foreground hover:border-primary/50"
-                  }`}
-                  data-testid={`zone-tab-${z.prefix}`}
-                >
-                  {hasHot && <span className="w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse" />}
-                  {z.prefix} · {z.zone === "Pared/Carousel" ? "Carousel" : z.zone.split(" - ").pop()?.split(" ").pop() ?? z.prefix}
-                </button>
-              );
-            })}
-          </div>
-
-          <div className="flex gap-2">
-            <div className="relative flex-1">
-              <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-              <Input placeholder="Search machine ID…" value={search} onChange={e => setSearch(e.target.value)} className="pl-7 h-8 text-xs" data-testid="input-search-machine" />
-              {search && <button onClick={() => setSearch("")} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"><X size={12} /></button>}
-            </div>
-            <Select value={filterStatus} onValueChange={setFilterStatus}>
-              <SelectTrigger className="h-8 w-36 text-xs" data-testid="select-filter-status">
-                <Filter size={12} className="mr-1 text-muted-foreground" /><SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All statuses</SelectItem>
-                {STATUS_OPTIONS.map(s => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-      </header>
-
-      <main className="flex-1 px-3 py-4 space-y-8 overflow-y-auto">
-        {isLoading ? (
-          <div className="grid grid-cols-6 gap-2">
-            {Array.from({ length: 24 }).map((_, i) => (
-              <div key={i} className="h-16 rounded-lg bg-muted animate-pulse" />
-            ))}
-          </div>
-        ) : (
-          <>
-            {showCarousel && (
-              <CarouselSection
-                machineMap={machineMap}
-                onClickMachine={handleClickMachine}
-                sessionId={sessionId}
-                savedCabinetOrder={savedCabinetOrder}
-                cabMachineOrder={cabMachineOrder}
-                onSortEnd={handleSortEnd}
-              />
-            )}
-
-            {(activeZone === "all" || activeZone === "Pasillo") && (
-              <CabinetZoneSection
-                zone="Pasillo"
-                cabinets={PASILLO_CABINETS as unknown as CabinetDef[]}
-                machineMap={machineMap}
-                onClickMachine={handleClickMachine}
-                sessionId={sessionId}
-                shouldShow={shouldShowMachine}
-                color="border-violet-600"
-                circularCabId="QC"
-                cabMachineOrder={cabMachineOrder}
-                onSortEnd={handleSortEnd}
-              />
-            )}
-            {(activeZone === "all" || activeZone === "Smoking Room") && (
-              <CabinetZoneSection
-                zone="Smoking Room"
-                cabinets={SMOKING_CABINETS as unknown as CabinetDef[]}
-                machineMap={machineMap}
-                onClickMachine={handleClickMachine}
-                sessionId={sessionId}
-                shouldShow={shouldShowMachine}
-                color="border-rose-600"
-                circularCabId="SC"
-                cabMachineOrder={cabMachineOrder}
-                onSortEnd={handleSortEnd}
-              />
-            )}
-
-            <section className="border border-border rounded-xl p-4 mt-4">
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Legend</p>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                {STATUS_OPTIONS.map(s => (
-                  <div key={s.value} className="flex items-center gap-2">
-                    <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${STATUS_DOT[s.value]}`} />
-                    <span className="text-xs text-muted-foreground">{s.label}</span>
-                  </div>
-                ))}
-              </div>
-              <Separator className="my-3" />
-              <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
-                <span className="flex items-center gap-1"><Zap size={11} className="text-yellow-400" /> = Sticky wilds</span>
-                <span className="flex items-center gap-1"><Coins size={11} className="text-amber-400" /> = Coins on board</span>
-                <span className="flex items-center gap-1"><Clock size={11} className="text-emerald-400" /> = Time in status</span>
-                <span className="flex items-center gap-1"><GripVertical size={11} /> = Drag to reorder cabinets & machines</span>
-              </div>
-            </section>
-          </>
-        )}
-      </main>
-
-      {selectedGrid && (
-        <MachineEditor
-          open={!!selectedGrid}
-          onClose={() => setSelectedGrid(null)}
-          gridId={selectedGrid.id}
-          zone={selectedGrid.zone}
-          sessionId={sessionId}
-          existing={selectedMachine}
-        />
-      )}
-
-      {showReport && (
-        <SessionReport
-          session={session}
-          machines={machines}
-          breaks={breaks}
-          onClose={() => setShowReport(false)}
-        />
-      )}
-
-      {/* Break modal */}
-      {showBreakModal && (
-        <BreakModal onStart={startBreak} onClose={() => setShowBreakModal(false)} />
-      )}
-
-      {/* Starting amount modal */}
-      {showStartModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
-          <div className="bg-card border border-border rounded-2xl p-6 w-[320px] shadow-2xl space-y-4">
-            <div>
-              <h2 className="text-sm font-bold">Session Starting Amount</h2>
-              <p className="text-xs text-muted-foreground mt-0.5">How much HKD are you starting with today?</p>
-            </div>
-            <div className="relative">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-xs font-mono">HKD</span>
-              <input
-                type="number" min="0" step="1" autoFocus
-                placeholder="e.g. 5000"
-                value={startInput}
-                onChange={e => setStartInput(e.target.value)}
-                onKeyDown={e => {
-                  if (e.key === "Enter" && startInput) {
-                    updateSessionMutation.mutate({ startingAmount: parseFloat(startInput) || 0 });
-                    setShowStartModal(false);
-                  }
-                }}
-                className="w-full bg-background border border-border rounded-xl pl-12 pr-3 py-2.5 text-sm font-mono font-bold text-right focus:outline-none focus:ring-1 focus:ring-primary"
-                data-testid="input-starting-amount"
-              />
-            </div>
-            <div className="flex gap-2">
-              <button
-                onClick={() => setShowStartModal(false)}
-                className="flex-1 border border-border rounded-lg py-2 text-xs text-muted-foreground hover:bg-muted/40"
-              >Skip</button>
-              <button
-                onClick={() => {
-                  if (startInput) updateSessionMutation.mutate({ startingAmount: parseFloat(startInput) || 0 });
-                  setShowStartModal(false);
-                }}
-                className="flex-1 bg-primary text-primary-foreground rounded-lg py-2 text-xs font-bold"
-                data-testid="btn-confirm-starting-amount"
-              >Confirm</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Finish session modal */}
-      {showFinishModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
-          <div className="bg-card border border-border rounded-2xl p-6 w-[320px] shadow-2xl space-y-4">
-            <div>
-              <h2 className="text-sm font-bold">Finish Session</h2>
-              <p className="text-xs text-muted-foreground mt-0.5">How much HKD are you walking out with?</p>
-              {(session?.startingAmount ?? 0) > 0 && (
-                <p className="text-xs text-muted-foreground mt-1">Started with <span className="font-bold text-foreground">{session!.startingAmount} HKD</span></p>
-              )}
-            </div>
-            <div className="relative">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-xs font-mono">HKD</span>
-              <input
-                type="number" min="0" step="1" autoFocus
-                placeholder="e.g. 4200"
-                value={finishInput}
-                onChange={e => setFinishInput(e.target.value)}
-                onKeyDown={e => {
-                  if (e.key === "Enter") {
-                    updateSessionMutation.mutate({
-                      finishedAmount: parseFloat(finishInput) || 0,
-                      endedAt: new Date().toISOString(),
-                    });
-                    setShowFinishModal(false);
-                    setShowReport(true);
-                  }
-                }}
-                className="w-full bg-background border border-border rounded-xl pl-12 pr-3 py-2.5 text-sm font-mono font-bold text-right focus:outline-none focus:ring-1 focus:ring-primary"
-                data-testid="input-finished-amount"
-              />
-            </div>
-            {finishInput && (session?.startingAmount ?? 0) > 0 && (() => {
-              const diff = (parseFloat(finishInput) || 0) - (session?.startingAmount ?? 0);
-              return (
-                <p className={`text-xs font-bold text-center ${diff >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                  {diff >= 0 ? "+" : ""}{diff} HKD
-                </p>
-              );
-            })()}
-            <div className="flex gap-2">
-              <button
-                onClick={() => setShowFinishModal(false)}
-                className="flex-1 border border-border rounded-lg py-2 text-xs text-muted-foreground hover:bg-muted/40"
-              >Cancel</button>
-              <button
-                onClick={() => {
-                  updateSessionMutation.mutate({
-                    finishedAmount: parseFloat(finishInput) || 0,
-                    endedAt: new Date().toISOString(),
-                  });
-                  setShowFinishModal(false);
-                  setShowReport(true);
-                }}
-                className="flex-1 bg-primary text-primary-foreground rounded-lg py-2 text-xs font-bold"
-                data-testid="btn-confirm-finished-amount"
-              >Save &amp; View Report</button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ── Break elapsed (small inline timer) ────────────────────────────
+// ── Break elapsed ─────────────────────────────────────────────────
 function BreakElapsed({ startedAt }: { startedAt: string }) {
   const elapsed = useElapsedTimer(startedAt);
-  return (
-    <span className="text-[10px] font-mono text-amber-300 ml-1">({formatElapsed(elapsed)})</span>
-  );
+  return <span className="text-[10px] font-mono text-amber-300 ml-1">({formatElapsed(elapsed)})</span>;
 }
 
-// ── Cabinet Zone Section (Pasillo / Smoking Room) ─────────────────
-type CabinetDef = { id: string; label: string; ids: readonly string[]; row: number; col: number };
+// ── Sortable Cabinet (for zone grid) ─────────────────────────────
+type CabinetDef = { id: string; label: string; ids: readonly string[]; row: number; col: number; circular?: boolean };
 
-// Sub-component for a single sortable cabinet in a zone (avoids hooks-in-loop issue)
-function SortableCabinet({ cab, machineMap, onClickMachine, color, cols, onToggleOrientation, cabMachineOrder, onSortEnd, shouldShow }: {
+function SortableCabinet({ cab, machineMap, onClickMachine, color, cols, onToggleOrientation, cabMachineOrder, onSortEnd, shouldShow, editMode, onRemoveMachine, onAddMachine, onRenameLabel, onDeleteCabinet }: {
   cab: CabinetDef;
   machineMap: Record<string, Machine>;
   onClickMachine: (id: string) => void;
@@ -1743,10 +1212,15 @@ function SortableCabinet({ cab, machineMap, onClickMachine, color, cols, onToggl
   cabMachineOrder: Record<string, string[]>;
   onSortEnd: (cabId: string, newOrder: string[]) => void;
   shouldShow: (id: string) => boolean;
+  editMode?: boolean;
+  onRemoveMachine?: (id: string) => void;
+  onAddMachine?: () => void;
+  onRenameLabel?: (newLabel: string) => void;
+  onDeleteCabinet?: () => void;
 }) {
   const machineIds = cabMachineOrder[cab.id] ?? [...cab.ids];
   const visIds = [...cab.ids].filter(shouldShow);
-  const visibleMachineIds = machineIds.filter(id => visIds.includes(id));
+  const visibleMachineIds = editMode ? machineIds : machineIds.filter(id => visIds.includes(id));
 
   const sortSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
@@ -1776,11 +1250,14 @@ function SortableCabinet({ cab, machineMap, onClickMachine, color, cols, onToggl
       >
         <span className="font-mono leading-none">{cols}</span>
       </button>
-      <DndContext
-        sensors={sortSensors}
-        collisionDetection={closestCenter}
-        onDragEnd={handleSortEnd}
-      >
+      {editMode && onDeleteCabinet && (
+        <button onClick={onDeleteCabinet}
+          className="absolute top-1.5 left-1.5 w-4 h-4 rounded-full bg-red-700 text-white flex items-center justify-center hover:bg-red-500"
+          title="Delete cabinet">
+          <X size={8} />
+        </button>
+      )}
+      <DndContext sensors={sortSensors} collisionDetection={closestCenter} onDragEnd={handleSortEnd}>
         <SortableContext items={machineIds} strategy={rectSortingStrategy}>
           <div className="gap-1" style={{ display: "grid", gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
             {visibleMachineIds.map(id => (
@@ -1789,8 +1266,16 @@ function SortableCabinet({ cab, machineMap, onClickMachine, color, cols, onToggl
                 gridId={id}
                 machine={machineMap[id]}
                 onClick={() => onClickMachine(id)}
+                editMode={editMode}
+                onRemove={editMode ? () => onRemoveMachine?.(id) : undefined}
               />
             ))}
+            {editMode && onAddMachine && (
+              <button onClick={onAddMachine}
+                className="w-full h-16 rounded-lg border-2 border-dashed border-border/50 flex items-center justify-center text-muted-foreground hover:border-primary/50 hover:text-primary transition-colors">
+                <Plus size={12} />
+              </button>
+            )}
           </div>
         </SortableContext>
       </DndContext>
@@ -1798,9 +1283,11 @@ function SortableCabinet({ cab, machineMap, onClickMachine, color, cols, onToggl
   );
 }
 
+// ── Cabinet Zone Section ──────────────────────────────────────────
 function CabinetZoneSection({
   zone, cabinets, machineMap, onClickMachine, sessionId, shouldShow, color,
-  circularCabId, cabMachineOrder, onSortEnd,
+  circularCabId, cabMachineOrder, onSortEnd, editMode, layoutId,
+  onRemoveMachine, onAddMachine, onRenameZone, onRenameCabinet, onDeleteCabinet, onAddCabinet,
 }: {
   zone: string;
   cabinets: CabinetDef[];
@@ -1812,24 +1299,54 @@ function CabinetZoneSection({
   circularCabId?: string;
   cabMachineOrder: Record<string, string[]>;
   onSortEnd: (cabId: string, newOrder: string[]) => void;
+  editMode?: boolean;
+  layoutId?: number;
+  onRemoveMachine?: (cabId: string, machineId: string) => void;
+  onAddMachine?: (cabId: string) => void;
+  onRenameZone?: (newName: string) => void;
+  onRenameCabinet?: (cabId: string, newLabel: string) => void;
+  onDeleteCabinet?: (cabId: string) => void;
+  onAddCabinet?: () => void;
 }) {
   const allIds = cabinets.flatMap(c => [...c.ids]);
-  const visibleCount = allIds.filter(shouldShow).length;
+  const visibleCount = editMode ? allIds.length : allIds.filter(shouldShow).length;
 
   const [cabOrientations, setCabOrientations] = useState<Record<string, number>>({});
   const toggleOrientation = useCallback((cabId: string) => {
     setCabOrientations(prev => { const cur = prev[cabId] ?? 2; return { ...prev, [cabId]: cur >= 3 ? 1 : cur + 1 }; });
   }, []);
 
-  const maxRow = Math.max(...cabinets.map(c => c.row));
-  const maxCol = Math.max(...cabinets.map(c => c.col));
+  const [editingZoneName, setEditingZoneName] = useState(false);
+  const [zoneNameVal, setZoneNameVal] = useState(zone);
+
+  const maxRow = Math.max(...cabinets.map(c => c.row), 0);
+  const maxCol = Math.max(...cabinets.map(c => c.col), 0);
 
   return (
     <section data-testid={`zone-section-${zone}`}>
       <div className="flex items-center gap-2 mb-4">
         <div className={`h-4 w-1 rounded-full ${color.replace("border-","bg-")}`} />
-        <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">{zone}</h2>
+        {editMode && !editingZoneName ? (
+          <h2
+            className="text-xs font-semibold text-muted-foreground uppercase tracking-wider cursor-pointer hover:text-primary"
+            onClick={() => setEditingZoneName(true)}
+          >{zone} ✎</h2>
+        ) : editMode && editingZoneName ? (
+          <input
+            autoFocus
+            className="text-xs font-semibold bg-background border border-border rounded px-1"
+            value={zoneNameVal}
+            onChange={e => setZoneNameVal(e.target.value)}
+            onBlur={() => { setEditingZoneName(false); onRenameZone?.(zoneNameVal); }}
+            onKeyDown={e => { if (e.key === "Enter") { setEditingZoneName(false); onRenameZone?.(zoneNameVal); } }}
+          />
+        ) : (
+          <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">{zone}</h2>
+        )}
         <span className="text-[10px] text-muted-foreground">({visibleCount} machines)</span>
+        {editMode && onAddCabinet && (
+          <button onClick={onAddCabinet} className="text-[10px] text-primary hover:underline ml-1">+ Cabinet</button>
+        )}
         <div className="ml-auto">
           <BulkStatusButton sessionId={sessionId} machines={allIds} zone={zone} onDone={() => {}} />
         </div>
@@ -1841,10 +1358,9 @@ function CabinetZoneSection({
       >
         {cabinets.map(cab => {
           const visIds = [...cab.ids].filter(shouldShow);
-          if (visIds.length === 0) return null;
+          if (!editMode && visIds.length === 0) return null;
 
-          // Circular cabinet (Pasillo CAB C)
-          if (cab.id === circularCabId) {
+          if (cab.circular || cab.id === circularCabId) {
             return (
               <div
                 key={cab.id}
@@ -1857,6 +1373,9 @@ function CabinetZoneSection({
                   machineMap={machineMap}
                   onClickMachine={onClickMachine}
                   color={color}
+                  editMode={editMode}
+                  onRemoveMachine={editMode ? (id) => onRemoveMachine?.(cab.id, id) : undefined}
+                  onAddMachine={editMode ? () => onAddMachine?.(cab.id) : undefined}
                 />
               </div>
             );
@@ -1874,6 +1393,11 @@ function CabinetZoneSection({
               cabMachineOrder={cabMachineOrder}
               onSortEnd={onSortEnd}
               shouldShow={shouldShow}
+              editMode={editMode}
+              onRemoveMachine={editMode ? (id) => onRemoveMachine?.(cab.id, id) : undefined}
+              onAddMachine={editMode ? () => onAddMachine?.(cab.id) : undefined}
+              onRenameLabel={editMode ? (newLabel) => onRenameCabinet?.(cab.id, newLabel) : undefined}
+              onDeleteCabinet={editMode ? () => onDeleteCabinet?.(cab.id) : undefined}
             />
           );
         })}
@@ -1882,7 +1406,196 @@ function CabinetZoneSection({
   );
 }
 
-// ── Session Report ─────────────────────────────────────────────
+// ── Carousel Section ──────────────────────────────────────────────
+function CarouselSection({
+  carouselCabinets, arcMachines, machineMap, onClickMachine, sessionId, savedCabinetOrder, cabMachineOrder, onSortEnd,
+  editMode, onRemoveMachine, onAddMachine, onRenameLabel, onDeleteCabinet,
+}: {
+  carouselCabinets: CabinetDef[];
+  arcMachines: string[];
+  machineMap: Record<string, Machine>;
+  onClickMachine: (id: string) => void;
+  sessionId: number;
+  savedCabinetOrder: string;
+  cabMachineOrder: Record<string, string[]>;
+  onSortEnd: (cabId: string, newOrder: string[]) => void;
+  editMode?: boolean;
+  onRemoveMachine?: (cabId: string, machineId: string) => void;
+  onAddMachine?: (cabId: string) => void;
+  onRenameLabel?: (cabId: string, newLabel: string) => void;
+  onDeleteCabinet?: (cabId: string) => void;
+}) {
+  const { toast } = useToast();
+  const carouselIds = carouselCabinets.map(c => c.id);
+  const defaultPositions: PosMap = {};
+  carouselCabinets.forEach(c => { defaultPositions[c.id] = { col: c.col, row: c.row }; });
+
+  const [positions, setPositions] = useState<PosMap>(() =>
+    parseSavedPositions(savedCabinetOrder, carouselIds) ?? defaultPositions
+  );
+
+  const [cabOrientations, setCabOrientations] = useState<Record<string, number>>({});
+  const toggleOrientation = useCallback((cabId: string) => {
+    setCabOrientations(prev => { const cur = prev[cabId] ?? 2; return { ...prev, [cabId]: cur >= 3 ? 1 : cur + 1 }; });
+  }, []);
+
+  useEffect(() => {
+    const parsed = parseSavedPositions(savedCabinetOrder, carouselIds);
+    if (parsed) setPositions(parsed);
+  }, [savedCabinetOrder]);
+
+  const [activeDragId, setActiveDragId] = useState<string | null>(null);
+  const [overCellId, setOverCellId] = useState<string | null>(null);
+
+  const savePositionsMutation = useMutation({
+    mutationFn: (pos: PosMap) =>
+      apiRequest("PUT", `/api/sessions/${sessionId}/cabinet-order`, { positions: pos }).then(r => r.json()),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/sessions", sessionId] });
+    },
+    onError: () => toast({ title: "Failed to save layout", variant: "destructive" }),
+  });
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(TouchSensor,   { activationConstraint: { delay: 200, tolerance: 5 } })
+  );
+
+  const handleDragStart = useCallback((event: DragStartEvent) => setActiveDragId(String(event.active.id)), []);
+  const handleDragOver  = useCallback((event: DragOverEvent) => setOverCellId(event.over ? String(event.over.id) : null), []);
+  const handleDragEnd   = useCallback((event: DragEndEvent) => {
+    const draggedId = String(event.active.id);
+    setActiveDragId(null);
+    setOverCellId(null);
+    if (!event.over) return;
+    const overId = String(event.over.id);
+    setPositions(prev => {
+      const next = { ...prev };
+      let targetPos: CabPos;
+      if (overId.includes(":")) {
+        const [col, row] = overId.split(":").map(Number);
+        targetPos = { col, row };
+      } else {
+        const targetCabPos = prev[overId];
+        if (!targetCabPos) return prev;
+        targetPos = targetCabPos;
+        next[overId] = prev[draggedId];
+      }
+      next[draggedId] = targetPos;
+      savePositionsMutation.mutate(next);
+      return next;
+    });
+  }, [savePositionsMutation]);
+
+  const maxRow = Math.max(...Object.values(positions).map(p => p.row), 1);
+  const rows = maxRow + 1;
+
+  const cellToCab = useMemo(() => {
+    const map: Record<string, string> = {};
+    Object.entries(positions).forEach(([cabId, pos]) => {
+      map[`${pos.col}:${pos.row}`] = cabId;
+    });
+    return map;
+  }, [positions]);
+
+  const allCarouselIds = carouselCabinets.flatMap(c => [...c.ids]);
+
+  return (
+    <section data-testid="zone-section-Pared/Carousel">
+      <div className="flex items-center gap-2 mb-5">
+        <div className="h-4 w-1 rounded-full bg-amber-500" />
+        <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Pared / Carousel</h2>
+        <span className="text-[10px] text-muted-foreground">({allCarouselIds.length + arcMachines.length} machines)</span>
+        <span className="text-[9px] text-muted-foreground/60 flex items-center gap-1 ml-1">
+          <GripVertical size={9} /> drag cabinets · drag machines inside
+        </span>
+        <div className="ml-auto flex items-center gap-2">
+          <BulkStatusButton
+            sessionId={sessionId}
+            machines={[...allCarouselIds, ...arcMachines]}
+            zone="Pared/Carousel"
+            onDone={() => {}}
+          />
+        </div>
+      </div>
+
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragStart={handleDragStart}
+        onDragOver={handleDragOver}
+        onDragEnd={handleDragEnd}
+      >
+        <div className="grid gap-6 pb-2" style={{ gridTemplateColumns: `repeat(${GRID_COLS}, minmax(0, 1fr))` }}>
+          {Array.from({ length: rows * GRID_COLS }).map((_, idx) => {
+            const col = idx % GRID_COLS;
+            const row = Math.floor(idx / GRID_COLS);
+            const cellKey = `${col}:${row}`;
+            const cabId = cellToCab[cellKey];
+            const cabDef = carouselCabinets.find(c => c.id === cabId);
+            const machineIds = cabId ? (cabMachineOrder[cabId] ?? [...(cabDef?.ids ?? [])]) : [];
+            return (
+              <GridCell key={cellKey} cellId={cabId ?? cellKey} occupied={!!cabId} isOver={overCellId === (cabId ?? cellKey)}>
+                {cabId && cabDef && (
+                  <DraggableCabinet
+                    cabinetId={cabId}
+                    machineIds={machineIds}
+                    machineMap={machineMap}
+                    onClickMachine={onClickMachine}
+                    cols={cabOrientations[cabId] ?? 2}
+                    onToggleOrientation={() => toggleOrientation(cabId)}
+                    label={cabDef.label}
+                    onSortEnd={onSortEnd}
+                    editMode={editMode}
+                    onRemoveMachine={editMode ? (id) => onRemoveMachine?.(cabId, id) : undefined}
+                    onAddMachine={editMode ? () => onAddMachine?.(cabId) : undefined}
+                    onRenameLabel={editMode ? (newLabel) => onRenameLabel?.(cabId, newLabel) : undefined}
+                    onDeleteCabinet={editMode ? () => onDeleteCabinet?.(cabId) : undefined}
+                  />
+                )}
+              </GridCell>
+            );
+          })}
+        </div>
+
+        <DragOverlay dropAnimation={{ duration: 180, easing: "ease" }}>
+          {activeDragId ? (() => {
+            const cabDef = carouselCabinets.find(c => c.id === activeDragId);
+            const machineIds = cabMachineOrder[activeDragId] ?? [...(cabDef?.ids ?? [])];
+            return (
+              <DraggableCabinet
+                cabinetId={activeDragId}
+                machineIds={machineIds}
+                machineMap={machineMap}
+                onClickMachine={() => {}}
+                isDragOverlay
+                cols={cabOrientations[activeDragId] ?? 2}
+                label={cabDef?.label ?? activeDragId}
+                onSortEnd={() => {}}
+              />
+            );
+          })() : null}
+        </DragOverlay>
+      </DndContext>
+
+      {arcMachines.length > 0 && (
+        <div className="mt-8">
+          <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium mb-4 ml-1">Carousel</p>
+          <CircularMachines
+            ids={arcMachines}
+            machineMap={machineMap}
+            onClickMachine={onClickMachine}
+            editMode={editMode}
+            onRemoveMachine={editMode ? (id) => onRemoveMachine?.("ARC", id) : undefined}
+            onAddMachine={editMode ? () => onAddMachine?.("ARC") : undefined}
+          />
+        </div>
+      )}
+    </section>
+  );
+}
+
+// ── Session Report ────────────────────────────────────────────────
 function SessionReport({ session, machines, breaks, onClose }: {
   session?: Session; machines: Machine[]; breaks: BreakEntry[]; onClose: () => void;
 }) {
@@ -1899,7 +1612,6 @@ function SessionReport({ session, machines, breaks, onClose }: {
   const outOfPaper = machines.filter(m => m.status === "out_of_paper").length;
   const runningOut = machines.filter(m => m.status === "running_out_of_money").length;
 
-  // Session timing
   const startedAt = session?.startedAt ?? "";
   const endedAt = session?.endedAt ?? "";
   let sessionDuration: string | null = null;
@@ -1909,19 +1621,16 @@ function SessionReport({ session, machines, breaks, onClose }: {
     sessionDuration = formatElapsed(secs);
   }
 
-  // Break totals
   const totalBreakSecs = breaks.reduce((total, b) => {
     const end = b.endedAt ? new Date(b.endedAt) : new Date();
     return total + Math.floor((end.getTime() - new Date(b.startedAt).getTime()) / 1000);
   }, 0);
 
-  // Player type breakdown
   const ptCounts: Record<string, number> = {};
   machines.filter(m => m.status === "being_played" && m.playerType).forEach(m => {
     ptCounts[m.playerType!] = (ptCounts[m.playerType!] ?? 0) + 1;
   });
 
-  // Signals seen
   const sigCounts: Record<string, number> = {};
   machines.filter(m => m.apSignal && m.apSignal !== "none").forEach(m => {
     sigCounts[m.apSignal] = (sigCounts[m.apSignal] ?? 0) + 1;
@@ -1939,8 +1648,6 @@ function SessionReport({ session, machines, breaks, onClose }: {
         </SheetHeader>
 
         <div className="space-y-5">
-
-          {/* Session Timing */}
           {startedAt && (
             <div className="rounded-xl border border-border bg-card/40 p-4">
               <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-3">Session Timing</p>
@@ -1983,7 +1690,6 @@ function SessionReport({ session, machines, breaks, onClose }: {
             </div>
           )}
 
-          {/* Cash P&L */}
           {startAmt > 0 && (
             <div className={`rounded-xl border p-4 ${
               cashNet === null ? "border-border bg-card/40" :
@@ -2013,29 +1719,15 @@ function SessionReport({ session, machines, breaks, onClose }: {
             </div>
           )}
 
-          {/* Machine-level P&L */}
           <div className="rounded-xl border border-border bg-card/40 p-4">
             <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-3">Machine P&amp;L</p>
             <div className="grid grid-cols-3 gap-3">
-              <div className="text-center">
-                <p className="text-[9px] text-muted-foreground">Won</p>
-                <p className="text-lg font-bold text-emerald-400">+{totalWon}</p>
-                <p className="text-[9px] text-muted-foreground">HKD</p>
-              </div>
-              <div className="text-center border-x border-border">
-                <p className="text-[9px] text-muted-foreground">Lost</p>
-                <p className="text-lg font-bold text-red-400">-{totalLost}</p>
-                <p className="text-[9px] text-muted-foreground">HKD</p>
-              </div>
-              <div className="text-center">
-                <p className="text-[9px] text-muted-foreground">Net</p>
-                <p className={`text-lg font-bold ${net >= 0 ? "text-emerald-400" : "text-red-400"}`}>{net >= 0 ? "+" : ""}{net}</p>
-                <p className="text-[9px] text-muted-foreground">HKD</p>
-              </div>
+              <div className="text-center"><p className="text-[9px] text-muted-foreground">Won</p><p className="text-lg font-bold text-emerald-400">+{totalWon}</p><p className="text-[9px] text-muted-foreground">HKD</p></div>
+              <div className="text-center border-x border-border"><p className="text-[9px] text-muted-foreground">Lost</p><p className="text-lg font-bold text-red-400">-{totalLost}</p><p className="text-[9px] text-muted-foreground">HKD</p></div>
+              <div className="text-center"><p className="text-[9px] text-muted-foreground">Net</p><p className={`text-lg font-bold ${net >= 0 ? "text-emerald-400" : "text-red-400"}`}>{net >= 0 ? "+" : ""}{net}</p><p className="text-[9px] text-muted-foreground">HKD</p></div>
             </div>
           </div>
 
-          {/* Machines played */}
           {played.length > 0 && (
             <div className="rounded-xl border border-border bg-card/40 p-4">
               <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-3">Machines Played ({played.length})</p>
@@ -2055,7 +1747,6 @@ function SessionReport({ session, machines, breaks, onClose }: {
             </div>
           )}
 
-          {/* Activity summary */}
           <div className="rounded-xl border border-border bg-card/40 p-4">
             <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-3">Activity Summary</p>
             <div className="grid grid-cols-2 gap-2 text-xs">
@@ -2069,7 +1760,6 @@ function SessionReport({ session, machines, breaks, onClose }: {
             </div>
           </div>
 
-          {/* Player types */}
           {Object.keys(ptCounts).length > 0 && (
             <div className="rounded-xl border border-border bg-card/40 p-4">
               <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-3">Player Types Observed</p>
@@ -2084,7 +1774,6 @@ function SessionReport({ session, machines, breaks, onClose }: {
             </div>
           )}
 
-          {/* AP signals */}
           {Object.keys(sigCounts).length > 0 && (
             <div className="rounded-xl border border-border bg-card/40 p-4">
               <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-3">AP Signals Observed</p>
@@ -2099,7 +1788,6 @@ function SessionReport({ session, machines, breaks, onClose }: {
             </div>
           )}
 
-          {/* Notes */}
           {machines.filter(m => m.notes).length > 0 && (
             <div className="rounded-xl border border-border bg-card/40 p-4">
               <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-3">Notes</p>
@@ -2118,3 +1806,678 @@ function SessionReport({ session, machines, breaks, onClose }: {
     </Sheet>
   );
 }
+
+// ── Helpers to convert DB layout to CabinetDef arrays ────────────
+function parseZonesConfig(raw: string): ZoneConfig[] {
+  try { return JSON.parse(raw) as ZoneConfig[]; } catch { return []; }
+}
+
+function zoneConfigToCabinetDefs(zone: ZoneConfig): CabinetDef[] {
+  return zone.cabinets.map(c => ({
+    id: c.id,
+    label: c.label,
+    ids: c.machineIds as readonly string[],
+    row: c.row,
+    col: c.col,
+    circular: c.circular,
+  }));
+}
+
+// ── Alarm polling: fires toast when alarmAt reached ───────────────
+function useAlarmToast(machines: Machine[], toast: ReturnType<typeof useToast>["toast"]) {
+  const firedRef = useRef<Set<number>>(new Set());
+
+  useEffect(() => {
+    const check = () => {
+      const now = Date.now();
+      for (const m of machines) {
+        if (!m.alarmAt || m.priority !== 2) continue;
+        const alarmTime = new Date(m.alarmAt).getTime();
+        if (alarmTime <= now && !firedRef.current.has(m.id)) {
+          firedRef.current.add(m.id);
+          toast({
+            title: `🔔 Alarm: ${m.machineNumber}`,
+            description: `High priority machine — check it now! (${m.zone})`,
+          });
+          // Reset alarm for next 5 minutes
+          setTimeout(() => { firedRef.current.delete(m.id); }, 5 * 60 * 1000);
+        }
+      }
+    };
+    check();
+    const id = setInterval(check, 10000);
+    return () => clearInterval(id);
+  }, [machines, toast]);
+}
+
+// ── Main page ─────────────────────────────────────────────────────
+export default function FloorMap() {
+  const params = useParams<{ id: string }>();
+  const sessionId = Number(params.id);
+  const { dark, toggle } = useTheme();
+  const [filterStatus, setFilterStatus] = useState<string>("all");
+  const [search, setSearch] = useState("");
+  const [selectedGrid, setSelectedGrid] = useState<{ id: string; zone: string } | null>(null);
+  const [activeZone, setActiveZone] = useState<string>("all");
+  const [showStartModal, setShowStartModal] = useState(false);
+  const [showFinishModal, setShowFinishModal] = useState(false);
+  const [startInput, setStartInput] = useState("");
+  const [finishInput, setFinishInput] = useState("");
+  const [amountPromptShown, setAmountPromptShown] = useState(false);
+  const [showBreakModal, setShowBreakModal] = useState(false);
+  const [showReport, setShowReport] = useState(false);
+  const [cabMachineOrder, setCabMachineOrder] = useState<Record<string, string[]>>({});
+  const [editMode, setEditMode] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const { toast } = useToast();
+
+  useAlarmToast([], toast); // Will be connected after machines load
+
+  const { data: session } = useQuery<Session>({
+    queryKey: ["/api/sessions", sessionId],
+    queryFn: () => apiRequest("GET", `/api/sessions/${sessionId}`).then(r => r.json()),
+  });
+
+  const { data: machines = [], isLoading } = useQuery<Machine[]>({
+    queryKey: ["/api/sessions", sessionId, "machines"],
+    queryFn: () => apiRequest("GET", `/api/sessions/${sessionId}/machines`).then(r => r.json()),
+    refetchInterval: 30000,
+  });
+
+  // Use alarm polling with actual machines
+  useAlarmToast(machines, toast);
+
+  const layoutId = session?.layoutId ?? 1;
+  const { data: layout } = useQuery<Layout>({
+    queryKey: ["/api/layouts", layoutId],
+    queryFn: () => apiRequest("GET", `/api/layouts/${layoutId}`).then(r => r.json()),
+    enabled: !!session,
+  });
+
+  // Parse zones from layout
+  const zonesConfig = useMemo(() => {
+    if (!layout) return [];
+    return parseZonesConfig(layout.zonesConfig);
+  }, [layout?.zonesConfig]);
+
+  const machineMap = useMemo(() => {
+    const m: Record<string, Machine> = {};
+    for (const machine of machines) m[machine.machineNumber] = machine;
+    return m;
+  }, [machines]);
+
+  // Load saved cab machine order from session
+  useEffect(() => {
+    if (session?.cabMachineOrder) {
+      const parsed = parseCabMachineOrder(session.cabMachineOrder);
+      if (Object.keys(parsed).length > 0) setCabMachineOrder(parsed);
+    }
+  }, [session?.id]);
+
+  // SSE subscription
+  useEffect(() => {
+    if (!sessionId) return;
+    const url = `/__PORT_5000__/api/sessions/${sessionId}/events`;
+    const es = new EventSource(url);
+    es.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        if (data.type === "machine_update" && data.machine) {
+          queryClient.setQueryData<Machine[]>(
+            ["/api/sessions", sessionId, "machines"],
+            (old = []) => {
+              const idx = old.findIndex(m => m.id === data.machine.id);
+              if (idx >= 0) {
+                const next = [...old];
+                next[idx] = data.machine;
+                return next;
+              }
+              return [...old, data.machine];
+            }
+          );
+        } else if (data.type === "machine_deleted") {
+          queryClient.setQueryData<Machine[]>(
+            ["/api/sessions", sessionId, "machines"],
+            (old = []) => old.filter(m => m.id !== data.machineId)
+          );
+        } else if (data.type === "session_update" && data.session) {
+          queryClient.setQueryData(["/api/sessions", sessionId], data.session);
+        }
+      } catch (_) {}
+    };
+    es.onerror = () => {
+      // SSE will auto-reconnect
+    };
+    return () => es.close();
+  }, [sessionId]);
+
+  const updateSessionMutation = useMutation({
+    mutationFn: (data: Record<string, unknown>) =>
+      apiRequest("PATCH", `/api/sessions/${sessionId}`, data).then(r => r.json()),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/sessions", sessionId] });
+    },
+  });
+
+  // Auto-set startedAt when session loads (if not set)
+  useEffect(() => {
+    if (session && !session.startedAt) {
+      updateSessionMutation.mutate({ startedAt: new Date().toISOString() });
+    }
+  }, [session?.id]);
+
+  // Auto-prompt starting amount once session loads and has none set
+  useEffect(() => {
+    if (session && !amountPromptShown && (session.startingAmount ?? 0) === 0) {
+      setAmountPromptShown(true);
+      setShowStartModal(true);
+    }
+  }, [session?.id]);
+
+  const breaks = useMemo(() => parseBreaks(session?.breaks), [session?.breaks]);
+  const activeBreak = breaks.find(b => !b.endedAt) ?? null;
+
+  function startBreak(type: BreakType) {
+    const newBreak: BreakEntry = { type, startedAt: new Date().toISOString(), endedAt: null };
+    const newBreaks = [...breaks, newBreak];
+    updateSessionMutation.mutate({ breaks: JSON.stringify(newBreaks) });
+    setShowBreakModal(false);
+    toast({ title: `Break started — ${type === "smoke" ? "🚬 Smoke" : type === "food" ? "🍽 Food" : "Other"}` });
+  }
+
+  function endBreak() {
+    const newBreaks = breaks.map(b =>
+      !b.endedAt ? { ...b, endedAt: new Date().toISOString() } : b
+    );
+    updateSessionMutation.mutate({ breaks: JSON.stringify(newBreaks) });
+    toast({ title: "Break ended — back to the floor!" });
+  }
+
+  function handleSortEnd(cabId: string, newOrder: string[]) {
+    const updated = { ...cabMachineOrder, [cabId]: newOrder };
+    setCabMachineOrder(updated);
+    updateSessionMutation.mutate({ cabMachineOrder: JSON.stringify(updated) });
+  }
+
+  const savedCabinetOrder = session?.cabinetOrder ?? "";
+
+  const selectedMachine = selectedGrid ? machineMap[selectedGrid.id] : undefined;
+
+  function getZoneForId(id: string): string {
+    for (const zone of zonesConfig) {
+      for (const cab of zone.cabinets) {
+        if (cab.machineIds.includes(id)) return zone.name;
+      }
+    }
+    return "Other";
+  }
+
+  function handleClickMachine(id: string) {
+    if (editMode) return; // In edit mode, clicking is for removal
+    setSelectedGrid({ id, zone: getZoneForId(id) });
+  }
+
+  function shouldShowMachine(id: string): boolean {
+    if (search && !id.toLowerCase().includes(search.toLowerCase())) return false;
+    if (filterStatus !== "all") {
+      const m = machineMap[id];
+      if (!m && filterStatus !== "unplayed") return false;
+      if (m && m.status !== filterStatus) return false;
+    }
+    return true;
+  }
+
+  // ── Edit mode: mutate layout ──────────────────────────────────
+  const [localZones, setLocalZones] = useState<ZoneConfig[]>([]);
+
+  useEffect(() => {
+    if (zonesConfig.length > 0) setLocalZones(zonesConfig);
+  }, [layout?.zonesConfig]);
+
+  const saveLayoutMutation = useMutation({
+    mutationFn: (zones: ZoneConfig[]) =>
+      apiRequest("PUT", `/api/layouts/${layoutId}`, { zonesConfig: JSON.stringify(zones) }).then(r => r.json()),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/layouts", layoutId] });
+      setSaving(false);
+      toast({ title: "Layout saved" });
+    },
+    onError: () => { setSaving(false); toast({ title: "Save failed", variant: "destructive" }); },
+  });
+
+  function saveLayoutChanges(zones: ZoneConfig[]) {
+    setSaving(true);
+    saveLayoutMutation.mutate(zones);
+  }
+
+  function handleRemoveMachine(zoneId: string, cabId: string, machineId: string) {
+    const newZones = localZones.map(z => {
+      if (z.id !== zoneId) return z;
+      return { ...z, cabinets: z.cabinets.map(c => {
+        if (c.id !== cabId) return c;
+        return { ...c, machineIds: c.machineIds.filter(m => m !== machineId) };
+      })};
+    });
+    setLocalZones(newZones);
+    saveLayoutChanges(newZones);
+  }
+
+  function handleAddMachine(zoneId: string, cabId: string) {
+    const zone = localZones.find(z => z.id === zoneId);
+    if (!zone) return;
+    const cab = zone.cabinets.find(c => c.id === cabId);
+    if (!cab) return;
+    const prefix = zone.name.startsWith("P") ? "P" : zone.name.startsWith("Pasillo") ? "Q" : zone.name.startsWith("Smoking") ? "S" : "M";
+    const allIds = localZones.flatMap(z => z.cabinets.flatMap(c => c.machineIds));
+    let n = allIds.length + 1;
+    let newId = `${prefix}-${String(n).padStart(2,"0")}`;
+    while (allIds.includes(newId)) { n++; newId = `${prefix}-${String(n).padStart(2,"0")}`; }
+    const newZones = localZones.map(z => {
+      if (z.id !== zoneId) return z;
+      return { ...z, cabinets: z.cabinets.map(c => {
+        if (c.id !== cabId) return c;
+        return { ...c, machineIds: [...c.machineIds, newId] };
+      })};
+    });
+    setLocalZones(newZones);
+    saveLayoutChanges(newZones);
+  }
+
+  function handleRenameZone(zoneId: string, newName: string) {
+    const newZones = localZones.map(z => z.id === zoneId ? { ...z, name: newName } : z);
+    setLocalZones(newZones);
+    saveLayoutChanges(newZones);
+  }
+
+  function handleRenameCabinet(zoneId: string, cabId: string, newLabel: string) {
+    const newZones = localZones.map(z => {
+      if (z.id !== zoneId) return z;
+      return { ...z, cabinets: z.cabinets.map(c => c.id === cabId ? { ...c, label: newLabel } : c) };
+    });
+    setLocalZones(newZones);
+    saveLayoutChanges(newZones);
+  }
+
+  function handleDeleteCabinet(zoneId: string, cabId: string) {
+    const newZones = localZones.map(z => {
+      if (z.id !== zoneId) return z;
+      return { ...z, cabinets: z.cabinets.filter(c => c.id !== cabId) };
+    });
+    setLocalZones(newZones);
+    saveLayoutChanges(newZones);
+  }
+
+  function handleAddCabinet(zoneId: string) {
+    const zone = localZones.find(z => z.id === zoneId);
+    if (!zone) return;
+    const maxCol = Math.max(...zone.cabinets.map(c => c.col), -1);
+    const maxRow = Math.max(...zone.cabinets.map(c => c.row), 0);
+    const newCabId = `${zoneId.slice(0,1).toUpperCase()}${Date.now().toString(36).slice(-4).toUpperCase()}`;
+    const newCab: CabinetConfig = {
+      id: newCabId,
+      label: "New CAB",
+      machineIds: [],
+      row: maxRow,
+      col: maxCol + 1,
+    };
+    const newZones = localZones.map(z => z.id === zoneId ? { ...z, cabinets: [...z.cabinets, newCab] } : z);
+    setLocalZones(newZones);
+    saveLayoutChanges(newZones);
+  }
+
+  // Use localZones in edit mode, zonesConfig otherwise
+  const activeZones = editMode ? localZones : zonesConfig;
+
+  // First zone is "Carousel" (Pared), rest are standard zones
+  const carouselZone = activeZones.find(z => z.name.toLowerCase().includes("carousel") || z.name.toLowerCase().includes("pared"));
+  const standardZonesData = activeZones.filter(z => z !== carouselZone);
+
+  const carouselCabinets = carouselZone
+    ? carouselZone.cabinets.filter(c => !c.circular).map(c => ({ ...c, ids: c.machineIds as readonly string[] }))
+    : [];
+  const arcCab = carouselZone?.cabinets.find(c => c.circular);
+  const arcMachines = arcCab ? arcCab.machineIds : [];
+
+  const showCarousel = activeZone === "all" || (carouselZone && activeZone === carouselZone.name);
+
+  return (
+    <div className="min-h-screen bg-background flex flex-col" data-testid="floor-map-page">
+      <header className="border-b border-border bg-card sticky top-0 z-20">
+        <div className="px-3 py-2.5 flex items-center gap-2 flex-wrap">
+          <Link href="/">
+            <Button size="icon" variant="ghost" className="h-8 w-8 shrink-0" data-testid="btn-back">
+              <ArrowLeft size={16} />
+            </Button>
+          </Link>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold truncate">{session?.name ?? "Loading…"}</p>
+            <div className="flex items-center gap-2">
+              <p className="text-[10px] text-muted-foreground">{session?.date} · {layout?.name ?? "Parisian Macao"}</p>
+              {session?.startedAt && <SessionTimer startedAt={session.startedAt} />}
+            </div>
+          </div>
+          <StatsBar machines={machines} />
+
+          {/* Edit mode toggle */}
+          <Button
+            size="sm"
+            variant={editMode ? "default" : "outline"}
+            className={`h-7 text-[11px] shrink-0 gap-1 ${editMode ? "bg-amber-600 hover:bg-amber-700 border-amber-600" : "border-border text-muted-foreground"}`}
+            onClick={() => {
+              if (editMode && localZones.length > 0) saveLayoutChanges(localZones);
+              setEditMode(e => !e);
+            }}
+            data-testid="btn-edit-mode"
+          >
+            {editMode ? <><Unlock size={10} /> Editing{saving ? " (saving…)" : ""}</> : <><Lock size={10} /> Locked</>}
+          </Button>
+
+          {/* Break button */}
+          {activeBreak ? (
+            <Button size="sm" variant="outline"
+              className="h-7 text-[11px] border-amber-500 text-amber-400 bg-amber-950/30 hover:bg-amber-950/60 shrink-0 gap-1 animate-pulse"
+              onClick={endBreak} data-testid="btn-end-break">
+              <Play size={10} /> Resume
+            </Button>
+          ) : (
+            <Button size="sm" variant="outline"
+              className="h-7 text-[11px] border-border text-muted-foreground hover:bg-muted/40 hover:border-amber-500/60 shrink-0 gap-1"
+              onClick={() => setShowBreakModal(true)} data-testid="btn-start-break">
+              <Pause size={10} /> Break
+            </Button>
+          )}
+
+          <Button size="sm" variant="outline"
+            className="h-7 text-[11px] border-amber-600 text-amber-400 hover:bg-amber-950/40 shrink-0"
+            onClick={() => { setFinishInput(String(session?.finishedAmount || "")); setShowFinishModal(true); }}
+            data-testid="btn-finish-session">
+            Finish
+          </Button>
+          <Button size="icon" variant="ghost" className="h-8 w-8 shrink-0" onClick={() => setShowReport(true)} data-testid="btn-session-report" title="Session Report">
+            <FileText size={15} />
+          </Button>
+          <Button size="icon" variant="ghost" className="h-8 w-8 shrink-0" onClick={toggle} data-testid="btn-theme-toggle-map">
+            {dark ? <Sun size={15} /> : <Moon size={15} />}
+          </Button>
+        </div>
+
+        {/* Active break banner */}
+        {activeBreak && (
+          <div className="px-3 pb-1.5">
+            <div className="flex items-center gap-2 bg-amber-950/40 border border-amber-500/40 rounded-lg px-3 py-1.5">
+              <span className="text-[10px] text-amber-400 font-semibold">
+                {activeBreak.type === "smoke" ? "🚬 Smoke break" : activeBreak.type === "food" ? "🍽 Food break" : "⏸ Break"} in progress
+              </span>
+              <BreakElapsed startedAt={activeBreak.startedAt} />
+              <button onClick={endBreak} className="ml-auto text-[9px] text-amber-400 hover:text-amber-300 font-bold">END BREAK</button>
+            </div>
+          </div>
+        )}
+
+        {/* Edit mode banner */}
+        {editMode && (
+          <div className="px-3 pb-1.5">
+            <div className="flex items-center gap-2 bg-amber-950/40 border border-amber-600/40 rounded-lg px-3 py-1.5">
+              <Unlock size={10} className="text-amber-400" />
+              <span className="text-[10px] text-amber-400 font-semibold">Edit Mode — click ✎ labels to rename, × to remove, + to add</span>
+              {saving && <span className="ml-auto text-[9px] text-amber-400 animate-pulse">Saving…</span>}
+            </div>
+          </div>
+        )}
+
+        <div className="px-3 pb-2.5 space-y-2">
+          <div className="flex gap-1.5 overflow-x-auto no-scrollbar">
+            <button
+              onClick={() => setActiveZone("all")}
+              className={`shrink-0 text-xs px-3 py-1 rounded-full border font-medium transition-all ${
+                activeZone === "all" ? "bg-primary text-primary-foreground border-primary" : "border-border text-muted-foreground hover:border-primary/50"
+              }`}
+              data-testid="zone-tab-all"
+            >All Zones</button>
+            {activeZones.map(z => (
+              <button
+                key={z.id}
+                onClick={() => setActiveZone(z.name)}
+                className={`shrink-0 text-xs px-3 py-1 rounded-full border font-medium transition-all flex items-center gap-1.5 ${
+                  activeZone === z.name ? "bg-primary text-primary-foreground border-primary" : "border-border text-muted-foreground hover:border-primary/50"
+                }`}
+                data-testid={`zone-tab-${z.id}`}
+              >
+                {z.name}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <Input placeholder="Search machine ID…" value={search} onChange={e => setSearch(e.target.value)} className="pl-7 h-8 text-xs" data-testid="input-search-machine" />
+              {search && <button onClick={() => setSearch("")} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"><X size={12} /></button>}
+            </div>
+            <Select value={filterStatus} onValueChange={setFilterStatus}>
+              <SelectTrigger className="h-8 w-36 text-xs" data-testid="select-filter-status">
+                <Filter size={12} className="mr-1 text-muted-foreground" /><SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All statuses</SelectItem>
+                {STATUS_OPTIONS.map(s => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+      </header>
+
+      <main className="flex-1 px-3 py-4 space-y-8 overflow-y-auto">
+        {isLoading || !layout ? (
+          <div className="grid grid-cols-6 gap-2">
+            {Array.from({ length: 24 }).map((_, i) => (
+              <div key={i} className="h-16 rounded-lg bg-muted animate-pulse" />
+            ))}
+          </div>
+        ) : (
+          <>
+            {showCarousel && carouselZone && (
+              <CarouselSection
+                carouselCabinets={carouselCabinets}
+                arcMachines={arcMachines}
+                machineMap={machineMap}
+                onClickMachine={handleClickMachine}
+                sessionId={sessionId}
+                savedCabinetOrder={savedCabinetOrder}
+                cabMachineOrder={cabMachineOrder}
+                onSortEnd={handleSortEnd}
+                editMode={editMode}
+                onRemoveMachine={editMode ? (cabId, machineId) => handleRemoveMachine(carouselZone.id, cabId, machineId) : undefined}
+                onAddMachine={editMode ? (cabId) => handleAddMachine(carouselZone.id, cabId) : undefined}
+                onRenameLabel={editMode ? (cabId, newLabel) => handleRenameCabinet(carouselZone.id, cabId, newLabel) : undefined}
+                onDeleteCabinet={editMode ? (cabId) => handleDeleteCabinet(carouselZone.id, cabId) : undefined}
+              />
+            )}
+
+            {standardZonesData.map(zone => {
+              if (activeZone !== "all" && activeZone !== zone.name) return null;
+              const cabinets = zoneConfigToCabinetDefs(zone);
+              return (
+                <CabinetZoneSection
+                  key={zone.id}
+                  zone={zone.name}
+                  cabinets={cabinets}
+                  machineMap={machineMap}
+                  onClickMachine={handleClickMachine}
+                  sessionId={sessionId}
+                  shouldShow={shouldShowMachine}
+                  color={zone.color}
+                  cabMachineOrder={cabMachineOrder}
+                  onSortEnd={handleSortEnd}
+                  editMode={editMode}
+                  layoutId={layoutId}
+                  onRemoveMachine={editMode ? (cabId, machineId) => handleRemoveMachine(zone.id, cabId, machineId) : undefined}
+                  onAddMachine={editMode ? (cabId) => handleAddMachine(zone.id, cabId) : undefined}
+                  onRenameZone={editMode ? (newName) => handleRenameZone(zone.id, newName) : undefined}
+                  onRenameCabinet={editMode ? (cabId, newLabel) => handleRenameCabinet(zone.id, cabId, newLabel) : undefined}
+                  onDeleteCabinet={editMode ? (cabId) => handleDeleteCabinet(zone.id, cabId) : undefined}
+                  onAddCabinet={editMode ? () => handleAddCabinet(zone.id) : undefined}
+                />
+              );
+            })}
+
+            <section className="border border-border rounded-xl p-4 mt-4">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Legend</p>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                {STATUS_OPTIONS.map(s => (
+                  <div key={s.value} className="flex items-center gap-2">
+                    <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${STATUS_DOT[s.value]}`} />
+                    <span className="text-xs text-muted-foreground">{s.label}</span>
+                  </div>
+                ))}
+              </div>
+              <Separator className="my-3" />
+              <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
+                <span className="flex items-center gap-1"><Zap size={11} className="text-yellow-400" /> = Sticky wilds</span>
+                <span className="flex items-center gap-1"><Coins size={11} className="text-amber-400" /> = Coins on board</span>
+                <span className="flex items-center gap-1"><Clock size={11} className="text-emerald-400" /> = Time in status</span>
+                <span className="flex items-center gap-1"><GripVertical size={11} /> = Drag to reorder</span>
+                <span className="flex items-center gap-1"><Bell size={11} className="text-red-400" /> = 5-min alarm active</span>
+              </div>
+              <div className="flex flex-wrap gap-2 mt-3">
+                {Object.entries(PLAYER_TYPE_PILL).map(([k, v]) => (
+                  <span key={k} className={`text-[9px] px-1.5 py-0.5 rounded font-bold ${v.bg} ${v.text}`}>{v.abbr} = {k.replace(/_/g," ")}</span>
+                ))}
+              </div>
+            </section>
+          </>
+        )}
+      </main>
+
+      {selectedGrid && !editMode && (
+        <MachineEditor
+          open={!!selectedGrid}
+          onClose={() => setSelectedGrid(null)}
+          gridId={selectedGrid.id}
+          zone={selectedGrid.zone}
+          sessionId={sessionId}
+          existing={selectedMachine}
+        />
+      )}
+
+      {showReport && (
+        <SessionReport
+          session={session}
+          machines={machines}
+          breaks={breaks}
+          onClose={() => setShowReport(false)}
+        />
+      )}
+
+      {showBreakModal && (
+        <BreakModal onStart={startBreak} onClose={() => setShowBreakModal(false)} />
+      )}
+
+      {/* Starting amount modal */}
+      {showStartModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
+          <div className="bg-card border border-border rounded-2xl p-6 w-[320px] shadow-2xl space-y-4">
+            <div>
+              <h2 className="text-sm font-bold">Session Starting Amount</h2>
+              <p className="text-xs text-muted-foreground mt-0.5">How much HKD are you starting with today?</p>
+            </div>
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-xs font-mono">HKD</span>
+              <input
+                type="number" min="0" step="1" autoFocus
+                placeholder="e.g. 5000"
+                value={startInput}
+                onChange={e => setStartInput(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === "Enter" && startInput) {
+                    updateSessionMutation.mutate({ startingAmount: parseFloat(startInput) || 0 });
+                    setShowStartModal(false);
+                  }
+                }}
+                className="w-full bg-background border border-border rounded-xl pl-12 pr-3 py-2.5 text-sm font-mono font-bold text-right focus:outline-none focus:ring-1 focus:ring-primary"
+                data-testid="input-starting-amount"
+              />
+            </div>
+            <div className="flex gap-2">
+              <button onClick={() => setShowStartModal(false)}
+                className="flex-1 border border-border rounded-lg py-2 text-xs text-muted-foreground hover:bg-muted/40">Skip</button>
+              <button
+                onClick={() => {
+                  if (startInput) updateSessionMutation.mutate({ startingAmount: parseFloat(startInput) || 0 });
+                  setShowStartModal(false);
+                }}
+                className="flex-1 bg-primary text-primary-foreground rounded-lg py-2 text-xs font-bold"
+                data-testid="btn-confirm-starting-amount"
+              >Confirm</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Finish session modal */}
+      {showFinishModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
+          <div className="bg-card border border-border rounded-2xl p-6 w-[320px] shadow-2xl space-y-4">
+            <div>
+              <h2 className="text-sm font-bold">Finish Session</h2>
+              <p className="text-xs text-muted-foreground mt-0.5">How much HKD are you walking out with?</p>
+              {(session?.startingAmount ?? 0) > 0 && (
+                <p className="text-xs text-muted-foreground mt-1">Started with <span className="font-bold text-foreground">{session!.startingAmount} HKD</span></p>
+              )}
+            </div>
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-xs font-mono">HKD</span>
+              <input
+                type="number" min="0" step="1" autoFocus
+                placeholder="e.g. 4200"
+                value={finishInput}
+                onChange={e => setFinishInput(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === "Enter") {
+                    updateSessionMutation.mutate({ finishedAmount: parseFloat(finishInput) || 0, endedAt: new Date().toISOString() });
+                    setShowFinishModal(false);
+                    setShowReport(true);
+                  }
+                }}
+                className="w-full bg-background border border-border rounded-xl pl-12 pr-3 py-2.5 text-sm font-mono font-bold text-right focus:outline-none focus:ring-1 focus:ring-primary"
+                data-testid="input-finished-amount"
+              />
+            </div>
+            {finishInput && (session?.startingAmount ?? 0) > 0 && (() => {
+              const diff = (parseFloat(finishInput) || 0) - (session?.startingAmount ?? 0);
+              return (
+                <p className={`text-xs font-bold text-center ${diff >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                  {diff >= 0 ? "+" : ""}{diff} HKD
+                </p>
+              );
+            })()}
+            <div className="flex gap-2">
+              <button onClick={() => setShowFinishModal(false)}
+                className="flex-1 border border-border rounded-lg py-2 text-xs text-muted-foreground hover:bg-muted/40">Cancel</button>
+              <button
+                onClick={() => {
+                  updateSessionMutation.mutate({ finishedAmount: parseFloat(finishInput) || 0, endedAt: new Date().toISOString() });
+                  setShowFinishModal(false);
+                  setShowReport(true);
+                }}
+                className="flex-1 bg-primary text-primary-foreground rounded-lg py-2 text-xs font-bold"
+                data-testid="btn-confirm-finished-amount"
+              >Save &amp; View Report</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Legacy exports for backward compat ────────────────────────────
+export const CAROUSEL_CABINETS = [
+  { id: "A", label: "CAB A", ids: ["P-01","P-02","P-03","P-04"] as const },
+  { id: "B", label: "CAB B", ids: ["P-05","P-06","P-07","P-08"] as const },
+  { id: "C", label: "CAB C", ids: ["P-09","P-10","P-11","P-12"] as const },
+  { id: "D", label: "CAB D", ids: ["P-13","P-14","P-15","P-16"] as const },
+  { id: "E", label: "CAB E", ids: ["P-17","P-18","P-19","P-20"] as const },
+  { id: "F", label: "CAB F", ids: ["P-21","P-22","P-23","P-24"] as const },
+];
+export const ARC_MACHINES = ["P-25","P-26","P-27","P-28","P-29","P-30","P-31","P-32"];

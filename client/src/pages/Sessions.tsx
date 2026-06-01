@@ -1,9 +1,9 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import { type Session } from "@shared/schema";
+import { type Session, type Layout } from "@shared/schema";
 import { useState } from "react";
 import { Link } from "wouter";
-import { Plus, Trash2, ChevronRight, Calendar, SlidersHorizontal, Moon, Sun } from "lucide-react";
+import { Plus, Trash2, ChevronRight, Calendar, SlidersHorizontal, Moon, Sun, LayoutGrid } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
@@ -24,6 +24,13 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 function useTheme() {
   const [dark, setDark] = useState(() => window.matchMedia("(prefers-color-scheme: dark)").matches);
@@ -43,20 +50,26 @@ export default function Sessions() {
   const [showNew, setShowNew] = useState(false);
   const [newName, setNewName] = useState("");
   const [newNotes, setNewNotes] = useState("");
+  const [newLayoutId, setNewLayoutId] = useState<string>("1");
   const [deleteId, setDeleteId] = useState<number | null>(null);
 
   const { data: sessions = [], isLoading } = useQuery<Session[]>({
     queryKey: ["/api/sessions"],
   });
 
+  const { data: layouts = [] } = useQuery<Layout[]>({
+    queryKey: ["/api/layouts"],
+  });
+
   const createMutation = useMutation({
-    mutationFn: (data: { name: string; date: string; notes: string }) =>
+    mutationFn: (data: { name: string; date: string; notes: string; layoutId: number }) =>
       apiRequest("POST", "/api/sessions", data).then((r) => r.json()),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/sessions"] });
       setShowNew(false);
       setNewName("");
       setNewNotes("");
+      setNewLayoutId("1");
       toast({ title: "Session created" });
     },
   });
@@ -73,7 +86,7 @@ export default function Sessions() {
   const handleCreate = () => {
     if (!newName.trim()) return;
     const today = new Date().toISOString().split("T")[0];
-    createMutation.mutate({ name: newName.trim(), date: today, notes: newNotes });
+    createMutation.mutate({ name: newName.trim(), date: today, notes: newNotes, layoutId: Number(newLayoutId) || 1 });
   };
 
   return (
@@ -92,11 +105,16 @@ export default function Sessions() {
               <circle cx="16" cy="24" r="2" fill="currentColor" opacity="0.6"/>
             </svg>
             <div>
-              <h1 className="text-base font-bold leading-tight">AP Tracker</h1>
+              <h1 className="text-base font-bold leading-tight">AP Tracker v2</h1>
               <p className="text-xs text-muted-foreground leading-tight">Parisian Macao · Advantage Play</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <Link href="/layout-builder">
+              <Button size="sm" variant="ghost" className="h-8 text-xs gap-1 text-muted-foreground" data-testid="btn-layout-builder">
+                <LayoutGrid size={13} /> Layouts
+              </Button>
+            </Link>
             <Button size="icon" variant="ghost" onClick={toggle} aria-label="Toggle theme" data-testid="btn-theme-toggle">
               {dark ? <Sun size={16} /> : <Moon size={16} />}
             </Button>
@@ -128,40 +146,46 @@ export default function Sessions() {
             <p className="text-xs text-muted-foreground uppercase tracking-wider font-medium mb-4">
               {sessions.length} session{sessions.length !== 1 ? "s" : ""}
             </p>
-            {sessions.map((s) => (
-              <div
-                key={s.id}
-                className="flex items-center gap-3 bg-card border border-border rounded-xl px-4 py-4 group hover:border-primary transition-colors"
-                data-testid={`card-session-${s.id}`}
-              >
-                <div className="flex-1 min-w-0">
-                  <Link href={`/session/${s.id}`} className="block">
-                    <p className="font-semibold text-sm truncate group-hover:text-primary transition-colors">{s.name}</p>
-                    <div className="flex items-center gap-2 mt-1">
-                      <Calendar size={11} className="text-muted-foreground" />
-                      <p className="text-xs text-muted-foreground">{s.date}</p>
-                      {s.notes && <span className="text-xs text-muted-foreground truncate">· {s.notes}</span>}
-                    </div>
-                  </Link>
-                </div>
-                <div className="flex items-center gap-1 shrink-0">
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    className="text-destructive hover:text-destructive hover:bg-destructive/10 h-8 w-8"
-                    onClick={(e) => { e.preventDefault(); setDeleteId(s.id); }}
-                    data-testid={`btn-delete-session-${s.id}`}
-                  >
-                    <Trash2 size={14} />
-                  </Button>
-                  <Link href={`/session/${s.id}`}>
-                    <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground" data-testid={`btn-open-session-${s.id}`}>
-                      <ChevronRight size={16} />
+            {sessions.map((s) => {
+              const layout = layouts.find(l => l.id === (s.layoutId ?? 1));
+              return (
+                <div
+                  key={s.id}
+                  className="flex items-center gap-3 bg-card border border-border rounded-xl px-4 py-4 group hover:border-primary transition-colors"
+                  data-testid={`card-session-${s.id}`}
+                >
+                  <div className="flex-1 min-w-0">
+                    <Link href={`/session/${s.id}`} className="block">
+                      <p className="font-semibold text-sm truncate group-hover:text-primary transition-colors">{s.name}</p>
+                      <div className="flex items-center gap-2 mt-1 flex-wrap">
+                        <Calendar size={11} className="text-muted-foreground" />
+                        <p className="text-xs text-muted-foreground">{s.date}</p>
+                        {layout && layout.id !== 1 && (
+                          <span className="text-[10px] text-primary/70 border border-primary/30 rounded px-1">{layout.name}</span>
+                        )}
+                        {s.notes && <span className="text-xs text-muted-foreground truncate">· {s.notes}</span>}
+                      </div>
+                    </Link>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="text-destructive hover:text-destructive hover:bg-destructive/10 h-8 w-8"
+                      onClick={(e) => { e.preventDefault(); setDeleteId(s.id); }}
+                      data-testid={`btn-delete-session-${s.id}`}
+                    >
+                      <Trash2 size={14} />
                     </Button>
-                  </Link>
+                    <Link href={`/session/${s.id}`}>
+                      <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground" data-testid={`btn-open-session-${s.id}`}>
+                        <ChevronRight size={16} />
+                      </Button>
+                    </Link>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </main>
@@ -192,6 +216,27 @@ export default function Sessions() {
                 onChange={(e) => setNewNotes(e.target.value)}
                 data-testid="input-session-notes"
               />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-muted-foreground mb-1 block">Floor Layout</label>
+              <Select value={newLayoutId} onValueChange={setNewLayoutId}>
+                <SelectTrigger data-testid="select-session-layout">
+                  <SelectValue placeholder="Select layout" />
+                </SelectTrigger>
+                <SelectContent>
+                  {layouts.map(l => (
+                    <SelectItem key={l.id} value={String(l.id)}>
+                      {l.name}{l.casino && l.casino !== l.name ? ` — ${l.casino}` : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-[10px] text-muted-foreground mt-1">
+                Or{" "}
+                <Link href="/layout-builder" className="text-primary hover:underline" onClick={() => setShowNew(false)}>
+                  create a new layout
+                </Link>
+              </p>
             </div>
           </div>
           <DialogFooter>

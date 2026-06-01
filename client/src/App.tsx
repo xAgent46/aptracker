@@ -5,6 +5,7 @@ import { queryClient } from "@/lib/queryClient";
 import { Toaster } from "@/components/ui/toaster";
 import Sessions from "@/pages/Sessions";
 import FloorMap from "@/pages/FloorMap";
+import LayoutBuilder from "@/pages/LayoutBuilder";
 import NotFound from "@/pages/not-found";
 
 export default function App() {
@@ -14,6 +15,8 @@ export default function App() {
         <Switch>
           <Route path="/" component={Sessions} />
           <Route path="/session/:id" component={FloorMap} />
+          <Route path="/layout-builder" component={LayoutBuilder} />
+          <Route path="/layout-builder/:layoutId" component={LayoutBuilder} />
           <Route component={NotFound} />
         </Switch>
       </Router>

@@ -16,6 +16,7 @@ export const sessions = sqliteTable("sessions", {
   endedAt: text("ended_at").default(""),         // ISO timestamp when Finish was clicked
   breaks: text("breaks").default("[]"),           // JSON: [{type,startedAt,endedAt|null}]
   cabMachineOrder: text("cab_machine_order").default(""), // JSON: {cabId: string[]} intra-cab machine order
+  layoutId: integer("layout_id").default(1),     // FK to layouts table
 });
 
 export const insertSessionSchema = createInsertSchema(sessions).omit({ id: true, createdAt: true });
@@ -43,11 +44,44 @@ export const machines = sqliteTable("machines", {
   outcomeType: text("outcome_type").default(""), // "won" | "lost" | "" — only set when played_by_me
   outcomeAmount: real("outcome_amount").default(0), // absolute value in HKD/chips
   playerType: text("player_type").default(""), // BEING_PLAYED_OPTIONS value — only set when being_played
+  alarmAt: text("alarm_at").default(""), // ISO timestamp for 5-min alarm
 });
 
 export const insertMachineSchema = createInsertSchema(machines).omit({ id: true, lastUpdated: true });
 export type InsertMachine = z.infer<typeof insertMachineSchema>;
 export type Machine = typeof machines.$inferSelect;
+
+// Layout type (from DB)
+export interface Layout {
+  id: number;
+  name: string;
+  casino: string;
+  createdAt: string;
+  zonesConfig: string; // JSON string
+}
+
+export interface MachineType {
+  id: number;
+  name: string;
+  isCustom: number;
+}
+
+// Zone/cabinet config types (parsed from zonesConfig JSON)
+export interface CabinetConfig {
+  id: string;
+  label: string;
+  machineIds: string[];
+  row: number;
+  col: number;
+  circular?: boolean;
+}
+
+export interface ZoneConfig {
+  id: string;
+  name: string;
+  color: string;
+  cabinets: CabinetConfig[];
+}
 
 // Predefined machine zones for the Parisian casino
 export const PARISIAN_ZONES = [
@@ -104,5 +138,10 @@ export const MACHINE_TYPES = [
   "5 Treasures",
   "Dancing Drums",
   "Coin Combo",
+  "Prosperity Peaks",
+  "Golden Egypt",
+  "Ocean Magic",
+  "Forbidden Beauty",
+  "Extreme Wild Lanterns",
   "Other",
 ] as const;
